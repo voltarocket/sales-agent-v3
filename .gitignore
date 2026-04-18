@@ -1,0 +1,8 @@
+node_modules/
+backend/node_modules/
+desktop/node_modules/
+backend/.env
+backend/uploads/
+backend/sales.json
+.DS_Store
+dist/

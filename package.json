@@ -1,0 +1,12 @@
+{
+  "name": "sales-agent",
+  "version": "3.0.0",
+  "private": true,
+  "scripts": {
+    "dev":         "concurrently \"npm run dev:backend\" \"npm run dev:desktop\" --names \"backend,desktop\" --prefix-colors \"cyan,magenta\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:desktop": "cd desktop && npm start",
+    "install:all": "npm install && cd backend && npm install && cd ../desktop && npm install"
+  },
+  "devDependencies": { "concurrently": "^8.2.2" }
+}

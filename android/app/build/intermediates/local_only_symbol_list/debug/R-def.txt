@@ -1,0 +1,4 @@
+R_DEF: Internal format may change without notice
+local
+style Theme.SalesAnalyzer
+xml network_security_config

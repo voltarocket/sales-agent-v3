@@ -1,0 +1,6 @@
+[
+    {
+        "merged": "com.sales.analyzer.app-merged_res-56:/xml_network_security_config.xml.flat",
+        "source": "com.sales.analyzer.app-main-58:/xml/network_security_config.xml"
+    }
+]
