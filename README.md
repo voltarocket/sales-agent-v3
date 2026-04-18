@@ -125,7 +125,7 @@ app → src → main → java → com → sales → analyzer → MainActivity.kt
 Найди строку и замени IP на свой:
 
 ```kotlin
-var backendUrl = "ws://192.168.1.100:3001"
+var backendUrl = "ws://10.0.2.2:3001"
 ```
 
 Узнать IP компьютера (в cmd):
