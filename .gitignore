@@ -6,3 +6,7 @@ backend/uploads/
 backend/sales.json
 .DS_Store
 dist/
+
+# Claude Code
+.claude/
+CLAUDE.md
