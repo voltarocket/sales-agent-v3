@@ -72,7 +72,7 @@ class PostCallActivity : ComponentActivity() {
             }
 
             if (rec.isNotEmpty()) {
-                Card(colors = CardDefaults.cardColors(containerColor = Color(0xFF0F1132)), shape = RoundedCornerShape(12.dp)) {
+                Card(colors = CardDefaults.cardColors(containerColor = C.surface2), shape = RoundedCornerShape(12.dp)) {
                     Column(Modifier.padding(14.dp)) {
                         Text("Рекомендация", color = C.text2, fontSize = 10.sp)
                         Spacer(Modifier.height(4.dp))
@@ -88,7 +88,7 @@ class PostCallActivity : ComponentActivity() {
                     Text("Сохранить клиента в базу?", color = C.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
                         OutlinedButton(onClick = { onDiscard() }, modifier = Modifier.weight(1f)) { Text("Только аналитика") }
-                        Button(onClick = { step = "form" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = C.accent)) { Text("Создать карточку") }
+                        Button(onClick = { step = "form" }, modifier = Modifier.weight(1f), colors = ButtonDefaults.buttonColors(containerColor = C.accent, contentColor = Color(0xFF0A0A0F))) { Text("Создать карточку") }
                     }
                 }
                 "form" -> {
