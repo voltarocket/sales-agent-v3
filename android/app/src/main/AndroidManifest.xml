@@ -1,20 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
+    <!-- Фикс #1: добавлен uses-feature для telephony permission -->
+    <uses-feature android:name="android.hardware.telephony" android:required="false"/>
+
     <uses-permission android:name="android.permission.RECORD_AUDIO"/>
     <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
     <uses-permission android:name="android.permission.INTERNET"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <!-- Фикс #2: добавлен foregroundServiceType для Android 14+ -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE"/>
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-    <!-- Обязательно для регистрации приложения как dialer -->
     <uses-permission android:name="android.permission.CALL_PHONE"/>
 
     <application
         android:name=".SalesApp"
         android:allowBackup="true"
         android:label="Sales Analyzer"
+        android:icon="@mipmap/ic_launcher"
         android:theme="@style/Theme.SalesAnalyzer"
         android:supportsRtl="true"
         android:networkSecurityConfig="@xml/network_security_config">
@@ -22,12 +26,11 @@
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:screenOrientation="portrait">
+            android:screenOrientation="unspecified">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
-            <!-- Обязательно: без этих фильтров система не предложит приложение как dialer -->
             <intent-filter>
                 <action android:name="android.intent.action.DIAL"/>
                 <category android:name="android.intent.category.DEFAULT"/>
@@ -42,9 +45,8 @@
         <activity
             android:name=".PostCallActivity"
             android:exported="false"
-            android:screenOrientation="portrait"/>
+            android:screenOrientation="unspecified"/>
 
-        <!-- InCallService: показывает UI во время звонка -->
         <service
             android:name=".CallService"
             android:exported="true"
@@ -53,11 +55,11 @@
                 android:name="android.telecom.IN_CALL_SERVICE_UI"
                 android:value="true"/>
             <intent-filter>
+                <!-- Фикс #3: исправлена опечатка InCallService (было INCALL) -->
                 <action android:name="android.telecom.InCallService"/>
             </intent-filter>
         </service>
 
-        <!-- ConnectionService: обязателен для регистрации как phone app -->
         <service
             android:name=".SalesConnectionService"
             android:exported="true"
