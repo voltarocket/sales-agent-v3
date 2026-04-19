@@ -82,17 +82,19 @@ function stopAudio() {
 // CALL FLOW
 // ═══════════════════════════════════════════════════════════
 async function startCall() {
-  const phone = document.getElementById("phone-inp")?.value.trim();
-  if (!phone) { alert("Введите номер"); return; }
-  S.phone = phone;
-
-  const ok = await window.api.startRecording({ phone, managerId: S.managerId });
+  const ok = await window.api.startRecording({ phone: "", managerId: S.managerId });
   if (ok?.error) { alert(ok.error); return; }
 
   if (!await startAudio()) return;
 
   S.recording = true; S.seconds = 0;
-  S.timerInt = setInterval(()=>{ S.seconds++; const el=document.getElementById("timer"); if(el) el.textContent=fmt(S.seconds); }, 1000);
+  S.timerInt = setInterval(()=>{
+    S.seconds++;
+    const t = fmt(S.seconds);
+    const el = document.getElementById("timer"); if(el) el.textContent=t;
+    const st = document.getElementById("sidebar-timer"); if(st) st.textContent=t;
+    const tt = document.getElementById("topbar-timer"); if(tt) tt.textContent=t;
+  }, 1000);
   render();
 }
 
@@ -178,6 +180,7 @@ function sidebar() {
   ${nav("managers","◉","Менеджеры")}
   ${nav("analytics","⊕","Аналитика")}
   <div class="sip-section">
+    ${S.recording?`<div class="call-active-bar"><span class="rec-dot"></span><span>Идёт разговор</span><span class="call-active-timer" id="sidebar-timer">${fmt(S.seconds)}</span></div>`:""}
     <div class="sip-row">
       <span class="sdot ${S.wsStatus==="connected"?"sdot-on":"sdot-off"}"></span>
       <span class="sip-lbl">${S.wsStatus==="connected"?"Бэкенд подключён":"Нет связи"}</span>
@@ -190,7 +193,8 @@ function sidebar() {
 function topbar() {
   const titles = { phone:"Звонок", contacts:"Контакты", calls:"История звонков", managers:"Менеджеры", analytics:"Аналитика" };
   const subs   = { phone:"Запись и анализ разговора", contacts:`${S.contacts.length} клиентов в базе`, calls:`${S.calls.length} звонков`, managers:`${S.managers.length} менеджеров`, analytics:"Анализ текста" };
-  return `<div class="topbar"><div><div class="pt">${titles[S.page]}</div><div class="ps">${subs[S.page]}</div></div></div>`;
+  const callBadge = S.recording ? `<div class="topbar-call-badge"><span class="rec-dot"></span>Идёт разговор · <span id="topbar-timer">${fmt(S.seconds)}</span></div>` : "";
+  return `<div class="topbar"><div><div class="pt">${titles[S.page]}</div><div class="ps">${subs[S.page]}</div></div>${callBadge}</div>`;
 }
 
 // ── Phone page ────────────────────────────────────────────
@@ -199,7 +203,7 @@ function pagePhone() {
   if (S.recording) return `
 <div class="rec-screen">
   <div class="rec-badge"><span class="rec-dot"></span>ЗАПИСЬ</div>
-  <div class="rec-phone">${esc(S.phone)}</div>
+  <div class="rec-phone">Входящий звонок</div>
   <div class="rec-timer" id="timer">${fmt(S.seconds)}</div>
   <div class="wave">${Array.from({length:14},(_,i)=>`<div class="wbar" style="animation-delay:${i*0.07}s"></div>`).join("")}</div>
   <button class="btn-stop" id="btn-stop">■ Завершить звонок</button>
@@ -208,13 +212,12 @@ function pagePhone() {
 
   return `
 <div class="phone-page">
-  <div class="phone-form card">
-    <div class="ctitle">Новый звонок</div>
-    ${S.managers.length>1?`<label>Менеджер</label><select id="mgr-sel">${mgrs}</select>`:""}
-    <label>Номер клиента</label>
-    <input id="phone-inp" type="tel" placeholder="+7 (999) 123-45-67" value="${esc(S.phone)}"/>
-    <button class="btn-primary btn-full" id="btn-start">● Начать запись</button>
-    <div class="hint" style="margin-top:10px">Нажмите кнопку перед тем как говорить с клиентом</div>
+  <div class="standby-card card">
+    <div class="standby-icon">☎</div>
+    <div class="standby-title">Ожидание звонка</div>
+    <div class="standby-sub">Нажмите кнопку когда начнётся разговор с клиентом</div>
+    ${S.managers.length>1?`<div style="margin-top:14px"><label>Менеджер</label><select id="mgr-sel">${mgrs}</select></div>`:""}
+    <button class="btn-primary btn-full" id="btn-start" style="margin-top:20px">● Принять и записать</button>
   </div>
 
   <div class="recent card">
@@ -439,7 +442,6 @@ function bind() {
   document.getElementById("btn-start")?.addEventListener("click", startCall);
   document.getElementById("btn-stop")?.addEventListener("click", stopCall);
   document.getElementById("mgr-sel")?.addEventListener("change", e => S.managerId=+e.target.value);
-  document.getElementById("phone-inp")?.addEventListener("input", e => S.phone=e.target.value);
 
   // Contacts
   document.querySelectorAll("[data-contact]").forEach(el =>
@@ -575,6 +577,13 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 
 /* Phone */
 .phone-page{display:grid;grid-template-columns:320px 1fr;gap:18px}
+.standby-card{text-align:center;padding:36px 24px}
+.standby-icon{font-size:44px;margin-bottom:14px;opacity:.5}
+.standby-title{font-size:18px;font-weight:700;margin-bottom:8px}
+.standby-sub{font-size:13px;color:var(--text2);line-height:1.6}
+.call-active-bar{display:flex;align-items:center;gap:8px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:var(--r);padding:6px 10px;margin-bottom:8px;font-size:11px;color:#f87171;font-weight:600}
+.call-active-timer{margin-left:auto;font-family:var(--mono)}
+.topbar-call-badge{display:flex;align-items:center;gap:8px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.2);border-radius:var(--r);padding:5px 14px;font-size:12px;font-weight:600;color:#f87171;font-family:var(--mono)}
 .btn-stop{width:100%;padding:14px;background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.25);border-radius:var(--rl);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:12px}
 .btn-stop:hover{background:rgba(239,68,68,.22)}
 .hint{text-align:center;font-size:11px;color:var(--text3)}
