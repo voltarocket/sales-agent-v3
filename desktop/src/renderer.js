@@ -14,7 +14,7 @@ const S = {
   analysis:    null,
   transcript:  "",
   duration:    0,
-  modal:       null,   // null | "ask" | "form" | "saving" | "done"
+  modal:       null,   // null | "wait" | "ask" | "form" | "saving" | "done"
   company:     "",
   cname:       "",
   selectedContact: null,
@@ -24,6 +24,7 @@ const S = {
   threshold:   5,
   mediaRecorder: null,
   timerInt:    null,
+  skipNextAnalysis: false,
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -394,7 +395,12 @@ function modalHtml() {
   let body = "";
 
   if (S.modal === "wait") {
-    body = `<div style="text-align:center;padding:30px 0"><div class="spinner" style="margin:0 auto 12px"></div><div>Транскрибирую и анализирую...</div></div>`;
+    body = `
+<div class="modal-header">
+  <span style="font-size:14px;font-weight:600;color:var(--text2)">Обработка звонка</span>
+  <button class="modal-close" id="btn-cancel-wait">✕</button>
+</div>
+<div style="text-align:center;padding:20px 0 30px"><div class="spinner" style="margin:0 auto 12px"></div><div>Транскрибирую и анализирую...</div></div>`;
   } else if (S.modal === "ask" && a) {
     body = `
 <h2>Звонок завершён</h2>
@@ -483,6 +489,9 @@ function bind() {
   });
 
   // Modal
+  document.getElementById("btn-cancel-wait")?.addEventListener("click", () => {
+    S.skipNextAnalysis = true; S.modal = null; render();
+  });
   document.getElementById("btn-discard")?.addEventListener("click", discardCall);
   document.getElementById("btn-to-form")?.addEventListener("click", () => { S.modal="form"; render(); });
   document.getElementById("btn-back-ask")?.addEventListener("click", () => { S.modal="ask"; render(); });
@@ -502,6 +511,7 @@ function bind() {
 window.api.on("ws-status", status => { S.wsStatus=status; render(); });
 window.api.on("processing", () => { S.modal="wait"; render(); });
 window.api.on("call-analyzed", msg => {
+  if (S.skipNextAnalysis) { S.skipNextAnalysis = false; return; }
   S.analysis   = msg.analysis;
   S.transcript = msg.transcript||"";
   S.duration   = msg.duration||S.seconds;
@@ -521,7 +531,7 @@ style.textContent = `
 :root{
   --bg:#0a0a0f;--surface:#13131a;--surface2:#1c1c26;
   --border:rgba(255,255,255,.07);--border2:rgba(255,255,255,.12);
-  --accent:#6366f1;--accent2:#818cf8;
+  --accent:#ffffff;--accent2:#e2e8f0;
   --text:#f1f5f9;--text2:#94a3b8;--text3:#475569;
   --mono:'IBM Plex Mono',monospace;--sans:'Manrope',sans-serif;
   --r:10px;--rl:16px;
@@ -536,9 +546,9 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .logo-h{font-size:16px;font-weight:700;margin-top:2px;letter-spacing:-.3px}
 .nav{display:flex;align-items:center;gap:10px;padding:9px 20px;cursor:pointer;color:var(--text2);font-size:13px;font-weight:500;border-left:2px solid transparent;transition:all .15s;user-select:none}
 .nav:hover{color:var(--text);background:rgba(255,255,255,.03)}
-.nav.on{color:var(--accent2);border-left-color:var(--accent);background:rgba(99,102,241,.08)}
+.nav.on{color:var(--accent2);border-left-color:var(--accent);background:rgba(255,255,255,.08)}
 .nicon{width:18px;text-align:center}
-.nbadge{margin-left:auto;font-size:10px;font-weight:600;border-radius:10px;padding:1px 7px;font-family:var(--mono);background:rgba(99,102,241,.2);color:var(--accent2)}
+.nbadge{margin-left:auto;font-size:10px;font-weight:600;border-radius:10px;padding:1px 7px;font-family:var(--mono);background:rgba(255,255,255,.2);color:var(--accent2)}
 .sip-section{margin-top:auto;padding:14px 20px;border-top:1px solid var(--border)}
 .sip-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text2)}
 .sdot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
@@ -562,11 +572,11 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 label{font-size:12px;color:var(--text2);display:block;margin-bottom:5px;margin-top:12px}
 label:first-of-type{margin-top:0}
 input,select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);font-family:var(--sans);font-size:13px;padding:9px 12px;outline:none;transition:border .15s}
-input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(99,102,241,.15)}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,255,255,.15)}
 textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 
 /* Buttons */
-.btn-primary{background:var(--accent);color:#fff;border:none;border-radius:var(--r);padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:8px}
+.btn-primary{background:var(--accent);color:#0a0a0f;border:none;border-radius:var(--r);padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:8px}
 .btn-primary:hover{background:var(--accent2)}
 .btn-full{width:100%;margin-top:14px}
 .btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border2);border-radius:var(--r);padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
@@ -602,7 +612,7 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .ccard{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:18px;cursor:pointer;transition:border .15s}
 .ccard:hover{border-color:var(--border2)}
 .ccard-hd{display:flex;align-items:center;gap:12px;margin-bottom:10px}
-.av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#fff;flex-shrink:0}
+.av{width:40px;height:40px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:#0a0a0f;flex-shrink:0}
 .cname{font-size:14px;font-weight:600}
 .cphone{font-size:12px;color:var(--text2);font-family:var(--mono)}
 .csumm{font-size:12px;color:var(--text2);line-height:1.6;margin-top:4px}
@@ -618,7 +628,7 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .call-sum{font-size:12px;color:var(--text2);line-height:1.5}
 .score-chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;font-family:var(--mono)}
 .ctag{font-size:11px;padding:2px 8px;border-radius:20px;font-family:var(--mono)}
-.ctag-saved{background:rgba(99,102,241,.15);color:var(--accent2)}
+.ctag-saved{background:rgba(255,255,255,.15);color:var(--accent2)}
 .ctag-anl{background:var(--surface2);color:var(--text3)}
 .empty-sm{font-size:12px;color:var(--text3);padding:12px 0}
 
@@ -647,7 +657,7 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .err-t{font-size:12px;font-weight:500}
 .err-d{font-size:11px;color:var(--text2);margin-top:2px}
 .pos-item{font-size:12px;color:#4ade80;padding:5px 10px;background:rgba(34,197,94,.06);border-radius:var(--r);border-left:2px solid #22c55e;margin-bottom:4px}
-.rec-box{padding:10px 12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:var(--r);font-size:13px;color:var(--accent2);line-height:1.6}
+.rec-box{padding:10px 12px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.2);border-radius:var(--r);font-size:13px;color:var(--accent2);line-height:1.6}
 
 /* Alerts */
 .alert-red{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);color:#fca5a5;padding:10px 14px;border-radius:var(--r);font-size:13px}
@@ -659,6 +669,11 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .modal-sub{font-size:12px;color:var(--text2);margin-bottom:16px}
 .mrow{display:flex;gap:10px}
 .mrow .btn-red,.mrow .btn-primary{flex:1;margin-top:0}
+
+/* Modal header / close */
+.modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
+.modal-close{background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 8px;border-radius:6px;line-height:1;transition:all .15s}
+.modal-close:hover{color:var(--text);background:rgba(255,255,255,.08)}
 
 /* Spinner */
 .spinner{width:18px;height:18px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:inline-block}

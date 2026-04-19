@@ -40,8 +40,8 @@ object C {
     val bg       = Color(0xFF0A0A0F)
     val surface  = Color(0xFF13131A)
     val surface2 = Color(0xFF1C1C26)
-    val accent   = Color(0xFF6366F1)
-    val accent2  = Color(0xFF818CF8)
+    val accent   = Color(0xFFFFFFFF)
+    val accent2  = Color(0xFFE2E8F0)
     val text     = Color(0xFFF1F5F9)
     val text2    = Color(0xFF94A3B8)
     val text3    = Color(0xFF475569)
@@ -305,7 +305,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(12.dp))
                     Button(
                         onClick = onSave,
-                        colors = ButtonDefaults.buttonColors(containerColor = C.accent),
+                        colors = ButtonDefaults.buttonColors(containerColor = C.accent, contentColor = Color(0xFF0A0A0F)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Text("Сохранить и переподключить")
@@ -338,7 +338,7 @@ class MainActivity : ComponentActivity() {
                         Spacer(Modifier.height(8.dp))
                         Button(
                             onClick = onRequestDefault,
-                            colors = ButtonDefaults.buttonColors(containerColor = C.accent),
+                            colors = ButtonDefaults.buttonColors(containerColor = C.accent, contentColor = Color(0xFF0A0A0F)),
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text("Установить как телефон по умолчанию")
