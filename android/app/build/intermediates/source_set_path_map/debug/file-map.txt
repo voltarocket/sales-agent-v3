@@ -50,10 +50,10 @@ com.sales.analyzer.app-jetified-lifecycle-viewmodel-savedstate-2.7.0-48 C:\Users
 com.sales.analyzer.app-jetified-ui-geometry-release-49 C:\Users\volta\.gradle\caches\transforms-3\efc264e8c459a54dcd9930a12bc586a8\transformed\jetified-ui-geometry-release\res
 com.sales.analyzer.app-jetified-animation-release-50 C:\Users\volta\.gradle\caches\transforms-3\f58a64af3bfb4feaf7a4c7d5002fd25e\transformed\jetified-animation-release\res
 com.sales.analyzer.app-jetified-lifecycle-process-2.7.0-51 C:\Users\volta\.gradle\caches\transforms-3\fd16af0feed526ab24171a225df1a31c\transformed\jetified-lifecycle-process-2.7.0\res
-com.sales.analyzer.app-pngs-52 C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\build\generated\res\pngs\debug
-com.sales.analyzer.app-resValues-53 C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\build\generated\res\resValues\debug
-com.sales.analyzer.app-packageDebugResources-54 C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
-com.sales.analyzer.app-packageDebugResources-55 C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
-com.sales.analyzer.app-merged_res-56 C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\build\intermediates\merged_res\debug
-com.sales.analyzer.app-debug-57 C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\debug\res
-com.sales.analyzer.app-main-58 C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\res
+com.sales.analyzer.app-pngs-52 C:\Users\volta\Downloads\sales-agent-v3\android\app\build\generated\res\pngs\debug
+com.sales.analyzer.app-resValues-53 C:\Users\volta\Downloads\sales-agent-v3\android\app\build\generated\res\resValues\debug
+com.sales.analyzer.app-packageDebugResources-54 C:\Users\volta\Downloads\sales-agent-v3\android\app\build\intermediates\incremental\debug\packageDebugResources\merged.dir
+com.sales.analyzer.app-packageDebugResources-55 C:\Users\volta\Downloads\sales-agent-v3\android\app\build\intermediates\incremental\debug\packageDebugResources\stripped.dir
+com.sales.analyzer.app-merged_res-56 C:\Users\volta\Downloads\sales-agent-v3\android\app\build\intermediates\merged_res\debug
+com.sales.analyzer.app-debug-57 C:\Users\volta\Downloads\sales-agent-v3\android\app\src\debug\res
+com.sales.analyzer.app-main-58 C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\res

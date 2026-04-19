@@ -8,229 +8,240 @@
 8        android:minSdkVersion="26"
 9        android:targetSdkVersion="34" />
 10
-11    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-11-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:4:5-70
-11-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:4:22-68
-12    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-12-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:5:5-74
-12-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:5:22-72
-13    <uses-permission android:name="android.permission.INTERNET" />
-13-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:6:5-66
-13-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:6:22-64
-14    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-14-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:7:5-76
-14-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:7:22-74
-15    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-15-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:8:5-87
-15-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:8:22-85
-16    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
-16-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:9:5-74
-16-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:9:22-72
-17    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
-17-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:10:5-76
-17-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:10:22-74
-18    <!-- Обязательно для регистрации приложения как dialer -->
-19    <uses-permission android:name="android.permission.CALL_PHONE" />
-19-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:12:5-68
-19-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:12:22-66
-20
-21    <permission
-21-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:22:5-24:47
-22        android:name="com.sales.analyzer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-22-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:23:9-81
-23        android:protectionLevel="signature" />
-23-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:24:9-44
-24
-25    <uses-permission android:name="com.sales.analyzer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
-25-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:26:5-97
-25-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:26:22-94
+11    <uses-feature
+11-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:4:5-87
+12        android:name="android.hardware.telephony"
+12-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:4:19-60
+13        android:required="false" />
+13-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:4:61-85
+14
+15    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+15-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:6:5-70
+15-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:6:22-68
+16    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+16-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:7:5-74
+16-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:7:22-72
+17    <uses-permission android:name="android.permission.INTERNET" />
+17-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:8:5-66
+17-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:8:22-64
+18    <!-- Фикс #2: явное объявление типа для Android 14+ -->
+19    <uses-permission
+19-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:10:5-11:53
+20        android:name="android.permission.FOREGROUND_SERVICE"
+20-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:10:22-74
+21        android:foregroundServiceType="microphone" />
+21-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:11:9-51
+22    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+22-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:12:5-87
+22-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:12:22-85
+23    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+23-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:13:5-74
+23-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:13:22-72
+24    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+24-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:14:5-76
+24-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:14:22-74
+25    <uses-permission android:name="android.permission.CALL_PHONE" />
+25-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:15:5-68
+25-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:15:22-66
 26
-27    <application
-27-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:14:5-75:19
-28        android:name="com.sales.analyzer.SalesApp"
-28-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:15:9-33
-29        android:allowBackup="true"
-29-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:16:9-35
-30        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
-30-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:28:18-86
-31        android:debuggable="true"
-32        android:extractNativeLibs="false"
-33        android:label="Sales Analyzer"
-33-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:17:9-39
-34        android:networkSecurityConfig="@xml/network_security_config"
-34-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:20:9-69
-35        android:supportsRtl="true"
-35-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:19:9-35
-36        android:testOnly="true"
-37        android:theme="@style/Theme.SalesAnalyzer" >
-37-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:18:9-51
-38        <activity
-38-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:22:9-40:20
-39            android:name="com.sales.analyzer.MainActivity"
-39-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:23:13-41
-40            android:exported="true"
-40-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:24:13-36
-41            android:screenOrientation="portrait" >
-41-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:25:13-49
-42            <intent-filter>
-42-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:26:13-29:29
-43                <action android:name="android.intent.action.MAIN" />
-43-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:27:17-68
-43-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:27:25-66
-44
-45                <category android:name="android.intent.category.LAUNCHER" />
-45-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:28:17-76
-45-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:28:27-74
-46            </intent-filter>
-47            <!-- Обязательно: без этих фильтров система не предложит приложение как dialer -->
-48            <intent-filter>
-48-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:31:13-35:29
-49                <action android:name="android.intent.action.DIAL" />
-49-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:32:17-68
-49-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:32:25-66
-50
-51                <category android:name="android.intent.category.DEFAULT" />
-51-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:33:17-75
-51-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:33:27-73
-52
-53                <data android:scheme="tel" />
-53-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:34:17-45
-53-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:34:23-43
-54            </intent-filter>
-55            <intent-filter>
-55-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:36:13-39:29
-56                <action android:name="android.intent.action.DIAL" />
-56-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:32:17-68
-56-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:32:25-66
-57
-58                <category android:name="android.intent.category.DEFAULT" />
-58-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:33:17-75
-58-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:33:27-73
-59            </intent-filter>
-60        </activity>
-61        <activity
-61-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:42:9-45:51
-62            android:name="com.sales.analyzer.PostCallActivity"
-62-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:43:13-45
-63            android:exported="false"
-63-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:44:13-37
-64            android:screenOrientation="portrait" />
-64-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:45:13-49
+27    <permission
+27-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:22:5-24:47
+28        android:name="com.sales.analyzer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+28-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:23:9-81
+29        android:protectionLevel="signature" />
+29-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:24:9-44
+30
+31    <uses-permission android:name="com.sales.analyzer.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION" />
+31-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:26:5-97
+31-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:26:22-94
+32
+33    <application
+33-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:17:5-78:19
+34        android:name="com.sales.analyzer.SalesApp"
+34-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:18:9-33
+35        android:allowBackup="true"
+35-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:19:9-35
+36        android:appComponentFactory="androidx.core.app.CoreComponentFactory"
+36-->[androidx.core:core:1.12.0] C:\Users\volta\.gradle\caches\transforms-3\6f3d36e3706179016bd3ae3643d20e3f\transformed\core-1.12.0\AndroidManifest.xml:28:18-86
+37        android:debuggable="true"
+38        android:extractNativeLibs="false"
+39        android:icon="@android:drawable/sym_def_app_icon"
+39-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:21:9-58
+40        android:label="Sales Analyzer"
+40-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:20:9-39
+41        android:networkSecurityConfig="@xml/network_security_config"
+41-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:24:9-69
+42        android:supportsRtl="true"
+42-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:23:9-35
+43        android:testOnly="true"
+44        android:theme="@style/Theme.SalesAnalyzer" >
+44-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:22:9-51
+45
+46        <!-- Фикс #3,#4: screenOrientation -> unspecified -->
+47        <activity
+47-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:27:9-44:20
+48            android:name="com.sales.analyzer.MainActivity"
+48-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:28:13-41
+49            android:exported="true"
+49-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:29:13-36
+50            android:screenOrientation="unspecified" >
+50-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:30:13-52
+51            <intent-filter>
+51-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:31:13-34:29
+52                <action android:name="android.intent.action.MAIN" />
+52-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:32:17-68
+52-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:32:25-66
+53
+54                <category android:name="android.intent.category.LAUNCHER" />
+54-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:33:17-76
+54-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:33:27-74
+55            </intent-filter>
+56            <intent-filter>
+56-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:35:13-39:29
+57                <action android:name="android.intent.action.DIAL" />
+57-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:36:17-68
+57-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:36:25-66
+58
+59                <category android:name="android.intent.category.DEFAULT" />
+59-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:37:17-75
+59-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:37:27-73
+60
+61                <data android:scheme="tel" />
+61-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:38:17-45
+61-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:38:23-43
+62            </intent-filter>
+63            <intent-filter>
+63-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:40:13-43:29
+64                <action android:name="android.intent.action.DIAL" />
+64-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:36:17-68
+64-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:36:25-66
 65
-66        <!-- InCallService: показывает UI во время звонка -->
-67        <service
-67-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:48:9-58:19
-68            android:name="com.sales.analyzer.CallService"
-68-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:49:13-40
-69            android:exported="true"
-69-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:50:13-36
-70            android:permission="android.permission.BIND_INCALL_SERVICE" >
-70-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:51:13-72
-71            <meta-data
-71-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:52:13-54:39
-72                android:name="android.telecom.IN_CALL_SERVICE_UI"
-72-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:53:17-66
-73                android:value="true" />
-73-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:54:17-37
-74
-75            <intent-filter>
-75-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:55:13-57:29
-76                <action android:name="android.telecom.InCallService" />
-76-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:56:17-71
-76-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:56:25-69
-77            </intent-filter>
-78        </service>
-79
-80        <!-- ConnectionService: обязателен для регистрации как phone app -->
-81        <service
-81-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:61:9-68:19
-82            android:name="com.sales.analyzer.SalesConnectionService"
-82-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:62:13-51
-83            android:exported="true"
-83-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:63:13-36
-84            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE" >
-84-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:64:13-84
-85            <intent-filter>
-85-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:65:13-67:29
-86                <action android:name="android.telecom.ConnectionService" />
-86-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:66:17-75
-86-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:66:25-73
-87            </intent-filter>
-88        </service>
-89        <service
-89-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:70:9-73:57
-90            android:name="com.sales.analyzer.AudioCaptureService"
-90-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:71:13-48
-91            android:exported="false"
-91-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:72:13-37
-92            android:foregroundServiceType="microphone" />
-92-->C:\Users\volta\Downloads\sales-agent-v3\android_fixed\android\app\src\main\AndroidManifest.xml:73:13-55
-93
-94        <provider
-94-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:24:9-32:20
-95            android:name="androidx.startup.InitializationProvider"
-95-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:25:13-67
-96            android:authorities="com.sales.analyzer.androidx-startup"
-96-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:26:13-68
-97            android:exported="false" >
-97-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:27:13-37
-98            <meta-data
-98-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:29:13-31:52
-99                android:name="androidx.emoji2.text.EmojiCompatInitializer"
-99-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:30:17-75
-100                android:value="androidx.startup" />
-100-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:31:17-49
-101            <meta-data
-101-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\volta\.gradle\caches\transforms-3\fd16af0feed526ab24171a225df1a31c\transformed\jetified-lifecycle-process-2.7.0\AndroidManifest.xml:29:13-31:52
-102                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
-102-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\volta\.gradle\caches\transforms-3\fd16af0feed526ab24171a225df1a31c\transformed\jetified-lifecycle-process-2.7.0\AndroidManifest.xml:30:17-78
-103                android:value="androidx.startup" />
-103-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\volta\.gradle\caches\transforms-3\fd16af0feed526ab24171a225df1a31c\transformed\jetified-lifecycle-process-2.7.0\AndroidManifest.xml:31:17-49
+66                <category android:name="android.intent.category.DEFAULT" />
+66-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:37:17-75
+66-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:37:27-73
+67            </intent-filter>
+68        </activity>
+69        <activity
+69-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:46:9-49:54
+70            android:name="com.sales.analyzer.PostCallActivity"
+70-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:47:13-45
+71            android:exported="false"
+71-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:48:13-37
+72            android:screenOrientation="unspecified" />
+72-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:49:13-52
+73
+74        <!-- Фикс #5,#6: убраны комментарии со словом INCALL -->
+75        <service
+75-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:52:9-62:19
+76            android:name="com.sales.analyzer.CallService"
+76-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:53:13-40
+77            android:exported="true"
+77-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:54:13-36
+78            android:permission="android.permission.BIND_INCALL_SERVICE" >
+78-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:55:13-72
+79            <meta-data
+79-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:56:13-58:39
+80                android:name="android.telecom.IN_CALL_SERVICE_UI"
+80-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:57:17-66
+81                android:value="true" />
+81-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:58:17-37
+82
+83            <intent-filter>
+83-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:59:13-61:29
+84                <action android:name="android.telecom.InCallService" />
+84-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:60:17-71
+84-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:60:25-69
+85            </intent-filter>
+86        </service>
+87        <service
+87-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:64:9-71:19
+88            android:name="com.sales.analyzer.SalesConnectionService"
+88-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:65:13-51
+89            android:exported="true"
+89-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:66:13-36
+90            android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE" >
+90-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:67:13-84
+91            <intent-filter>
+91-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:68:13-70:29
+92                <action android:name="android.telecom.ConnectionService" />
+92-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:69:17-75
+92-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:69:25-73
+93            </intent-filter>
+94        </service>
+95        <service
+95-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:73:9-76:57
+96            android:name="com.sales.analyzer.AudioCaptureService"
+96-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:74:13-48
+97            android:exported="false"
+97-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:75:13-37
+98            android:foregroundServiceType="microphone" />
+98-->C:\Users\volta\Downloads\sales-agent-v3\android\app\src\main\AndroidManifest.xml:76:13-55
+99
+100        <provider
+100-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:24:9-32:20
+101            android:name="androidx.startup.InitializationProvider"
+101-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:25:13-67
+102            android:authorities="com.sales.analyzer.androidx-startup"
+102-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:26:13-68
+103            android:exported="false" >
+103-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:27:13-37
 104            <meta-data
-104-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:29:13-31:52
-105                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
-105-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:30:17-85
+104-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:29:13-31:52
+105                android:name="androidx.emoji2.text.EmojiCompatInitializer"
+105-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:30:17-75
 106                android:value="androidx.startup" />
-106-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:31:17-49
-107        </provider>
-108
-109        <receiver
-109-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:34:9-52:20
-110            android:name="androidx.profileinstaller.ProfileInstallReceiver"
-110-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:35:13-76
-111            android:directBootAware="false"
-111-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:36:13-44
-112            android:enabled="true"
-112-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:37:13-35
-113            android:exported="true"
-113-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:38:13-36
-114            android:permission="android.permission.DUMP" >
-114-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:39:13-57
-115            <intent-filter>
-115-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:40:13-42:29
-116                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
-116-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:41:17-91
-116-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:41:25-88
-117            </intent-filter>
-118            <intent-filter>
-118-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:43:13-45:29
-119                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
-119-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:44:17-85
-119-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:44:25-82
-120            </intent-filter>
+106-->[androidx.emoji2:emoji2:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\cdb1240d9000bde75f7628197766cfb0\transformed\jetified-emoji2-1.3.0\AndroidManifest.xml:31:17-49
+107            <meta-data
+107-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\volta\.gradle\caches\transforms-3\fd16af0feed526ab24171a225df1a31c\transformed\jetified-lifecycle-process-2.7.0\AndroidManifest.xml:29:13-31:52
+108                android:name="androidx.lifecycle.ProcessLifecycleInitializer"
+108-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\volta\.gradle\caches\transforms-3\fd16af0feed526ab24171a225df1a31c\transformed\jetified-lifecycle-process-2.7.0\AndroidManifest.xml:30:17-78
+109                android:value="androidx.startup" />
+109-->[androidx.lifecycle:lifecycle-process:2.7.0] C:\Users\volta\.gradle\caches\transforms-3\fd16af0feed526ab24171a225df1a31c\transformed\jetified-lifecycle-process-2.7.0\AndroidManifest.xml:31:17-49
+110            <meta-data
+110-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:29:13-31:52
+111                android:name="androidx.profileinstaller.ProfileInstallerInitializer"
+111-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:30:17-85
+112                android:value="androidx.startup" />
+112-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:31:17-49
+113        </provider>
+114
+115        <receiver
+115-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:34:9-52:20
+116            android:name="androidx.profileinstaller.ProfileInstallReceiver"
+116-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:35:13-76
+117            android:directBootAware="false"
+117-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:36:13-44
+118            android:enabled="true"
+118-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:37:13-35
+119            android:exported="true"
+119-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:38:13-36
+120            android:permission="android.permission.DUMP" >
+120-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:39:13-57
 121            <intent-filter>
-121-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:46:13-48:29
-122                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
-122-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:47:17-88
-122-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:47:25-85
+121-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:40:13-42:29
+122                <action android:name="androidx.profileinstaller.action.INSTALL_PROFILE" />
+122-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:41:17-91
+122-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:41:25-88
 123            </intent-filter>
 124            <intent-filter>
-124-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:49:13-51:29
-125                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
-125-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:50:17-95
-125-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:50:25-92
+124-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:43:13-45:29
+125                <action android:name="androidx.profileinstaller.action.SKIP_FILE" />
+125-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:44:17-85
+125-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:44:25-82
 126            </intent-filter>
-127        </receiver>
-128    </application>
-129
-130</manifest>
+127            <intent-filter>
+127-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:46:13-48:29
+128                <action android:name="androidx.profileinstaller.action.SAVE_PROFILE" />
+128-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:47:17-88
+128-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:47:25-85
+129            </intent-filter>
+130            <intent-filter>
+130-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:49:13-51:29
+131                <action android:name="androidx.profileinstaller.action.BENCHMARK_OPERATION" />
+131-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:50:17-95
+131-->[androidx.profileinstaller:profileinstaller:1.3.0] C:\Users\volta\.gradle\caches\transforms-3\509239d59a2fb728db1a01a51b2d5b35\transformed\jetified-profileinstaller-1.3.0\AndroidManifest.xml:50:25-92
+132            </intent-filter>
+133        </receiver>
+134    </application>
+135
+136</manifest>
