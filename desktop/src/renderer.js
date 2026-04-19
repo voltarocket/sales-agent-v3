@@ -540,13 +540,13 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 .shell{display:flex;height:100vh}
 
 /* Sidebar */
-.sidebar{width:220px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 0;overflow-y:auto}
-.logo{padding:0 20px 18px;border-bottom:1px solid var(--border);margin-bottom:12px}
-.logo-tag{font-family:var(--mono);font-size:10px;color:var(--accent2);letter-spacing:2px;text-transform:uppercase}
+.sidebar{width:220px;flex-shrink:0;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 0;overflow-y:auto;position:relative;z-index:10}
+.logo{padding:0 20px 18px;border-bottom:1px solid var(--border);margin-bottom:12px;cursor:default}
+.logo-tag{font-family:var(--mono);font-size:10px;color:var(--text3);letter-spacing:2px;text-transform:uppercase}
 .logo-h{font-size:16px;font-weight:700;margin-top:2px;letter-spacing:-.3px}
 .nav{display:flex;align-items:center;gap:10px;padding:9px 20px;cursor:pointer;color:var(--text2);font-size:13px;font-weight:500;border-left:2px solid transparent;transition:all .15s;user-select:none}
-.nav:hover{color:var(--text);background:rgba(255,255,255,.03)}
-.nav.on{color:var(--accent2);border-left-color:var(--accent);background:rgba(255,255,255,.08)}
+.nav:hover{color:var(--text);background:rgba(255,255,255,.06)}
+.nav.on{color:var(--accent2);border-left-color:var(--accent);background:rgba(255,255,255,.14);font-weight:600}
 .nicon{width:18px;text-align:center}
 .nbadge{margin-left:auto;font-size:10px;font-weight:600;border-radius:10px;padding:1px 7px;font-family:var(--mono);background:rgba(255,255,255,.2);color:var(--accent2)}
 .sip-section{margin-top:auto;padding:14px 20px;border-top:1px solid var(--border)}
