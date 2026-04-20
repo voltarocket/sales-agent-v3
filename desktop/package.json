@@ -1,11 +1,25 @@
 {
   "name": "sales-desktop",
   "version": "3.0.0",
+  "main": "src/main.js",
   "scripts": {
-    "dev":   "tauri dev",
-    "build": "tauri build"
+    "start": "electron .",
+    "dev":   "electron . --dev",
+    "build": "electron-builder"
+  },
+  "dependencies": {
+    "ws": "^8.17.1"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.0.0"
+    "electron":         "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.sales.analyzer",
+    "productName": "Sales Analyzer",
+    "files": ["src/**/*"],
+    "win":   { "target": "nsis" },
+    "mac":   { "target": "dmg" },
+    "linux": { "target": "AppImage" }
   }
 }
