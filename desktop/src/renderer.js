@@ -61,6 +61,7 @@ async function doLogin() {
   S.currentUser = { id: res.id, name: res.name };
   S.managerId = res.id;
   await window.api.setToken(res.token);
+  S.wsStatus = await window.api.getWsStatus();
   load();
 }
 

@@ -85,5 +85,6 @@ ipcMain.handle("api-get",      (_, endpoint)        => api(endpoint));
 ipcMain.handle("api-post",     (_, endpoint, body)   => api(endpoint,"POST",body));
 ipcMain.handle("api-put",      (_, endpoint, body)   => api(endpoint,"PUT",body));
 ipcMain.handle("api-delete",   (_, endpoint)         => api(endpoint,"DELETE"));
-ipcMain.handle("api-set-token",(_, token)            => { authToken = token; return { ok: true }; });
-ipcMain.handle("api-login",    (_, creds)            => api("/api/auth/login","POST",creds,null));
+ipcMain.handle("api-set-token",  (_, token) => { authToken = token; return { ok: true }; });
+ipcMain.handle("api-login",      (_, creds) => api("/api/auth/login","POST",creds,null));
+ipcMain.handle("ws-status-query", ()        => wsClient?.readyState === WS.OPEN ? "connected" : "disconnected");

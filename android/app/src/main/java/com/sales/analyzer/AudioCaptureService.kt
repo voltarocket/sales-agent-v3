@@ -59,7 +59,7 @@ class AudioCaptureService : Service() {
             SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
             AudioFormat.ENCODING_PCM_16BIT, BUFFER_SIZE
         )
-        streamer?.startCall(phone)
+        streamer?.startCall(phone, AppSession.managerId)
         audioRecord?.startRecording()
         isRecording = true
         scope.launch {

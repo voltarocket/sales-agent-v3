@@ -2,8 +2,9 @@ const { contextBridge, ipcRenderer } = require("electron");
 
 contextBridge.exposeInMainWorld("api", {
   // Auth
-  login:    (creds)  => ipcRenderer.invoke("api-login", creds),
-  setToken: (token)  => ipcRenderer.invoke("api-set-token", token),
+  login:         (creds) => ipcRenderer.invoke("api-login", creds),
+  setToken:      (token) => ipcRenderer.invoke("api-set-token", token),
+  getWsStatus:   ()      => ipcRenderer.invoke("ws-status-query"),
 
   // Recording
   startRecording: (d)     => ipcRenderer.invoke("start-recording", d),
