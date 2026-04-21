@@ -6,7 +6,7 @@ const S = {
   loginError: "",
   loginBusy:  false,
 
-  page:     "managers",   // managers | add-manager
+  page:     "managers",   // managers | settings
   managers: [],
   calls:    [],
   selected: null,   // selected manager object
@@ -15,6 +15,10 @@ const S = {
 
   form: { name:"", username:"", password:"", color:"#6366f1" },
   editForm: { name:"", username:"", password:"", color:"" },
+  settingsForm: { username:"", password:"", password2:"" },
+  settingsError: "",
+  settingsDone: false,
+  settingsBusy: false,
   formError: "",
   formBusy: false,
 };
@@ -56,7 +60,7 @@ function html() {
   <div class="main">
     ${topbar()}
     <div class="content">
-      ${S.selected ? pageManagerDetail() : pageManagers()}
+      ${S.page==="settings" ? pageSettings() : (S.selected ? pageManagerDetail() : pageManagers())}
     </div>
   </div>
 </div>
@@ -73,12 +77,13 @@ function loginPage() {
       <div class="logo-h">Admin Panel</div>
     </div>
     <div class="login-title">Вход администратора</div>
-    <div class="login-hint">Введите ADMIN_TOKEN из backend/.env<br>или из консоли при старте бэкенда</div>
-    ${S.loginError ? `<div class="alert-red" style="margin:14px 0">${esc(S.loginError)}</div>` : ""}
-    <label>Токен администратора</label>
-    <input id="login-token" type="password" placeholder="••••••••••••••••" autocomplete="off"/>
+    ${S.loginError ? `<div class="alert-red" style="margin-bottom:14px">${esc(S.loginError)}</div>` : ""}
+    <label>Логин</label>
+    <input id="login-username" type="text" placeholder="admin" autocomplete="username"/>
+    <label>Пароль</label>
+    <input id="login-password" type="password" placeholder="••••••" autocomplete="current-password"/>
     <button class="btn-primary btn-full ${S.loginBusy?"disabled":""}" id="btn-login" ${S.loginBusy?"disabled":""} style="margin-top:20px">
-      ${S.loginBusy?`<span class="spinner"></span> Проверяю...`:"Войти"}
+      ${S.loginBusy?`<span class="spinner"></span> Вхожу...`:"Войти"}
     </button>
   </div>
 </div>`;
@@ -94,9 +99,12 @@ function sidebar() {
   </div>
   <div class="nav-section">
     <div class="nav-label">Управление</div>
-    <div class="nav ${!S.selected?"on":""}" id="nav-managers">
+    <div class="nav ${S.page==="managers"?"on":""}" id="nav-managers">
       <span class="nicon">◉</span>Менеджеры
       <span class="nbadge">${S.managers.length}</span>
+    </div>
+    <div class="nav ${S.page==="settings"?"on":""}" id="nav-settings">
+      <span class="nicon">⚙</span>Настройки
     </div>
   </div>
   <div class="sidebar-bottom">
@@ -117,6 +125,10 @@ function sidebar() {
 
 // ── Topbar ─────────────────────────────────────────────────
 function topbar() {
+  if (S.page === "settings") return `
+<div class="topbar">
+  <div><div class="pt">Настройки</div><div class="ps">Учётные данные администратора</div></div>
+</div>`;
   const title = S.selected ? esc(S.selected.name) : "Менеджеры";
   const sub   = S.selected
     ? `${S.selected.calls_count||0} звонков · ${S.selected.violations||0} нарушений`
@@ -262,6 +274,31 @@ function pageManagerDetail() {
 </div>`;
 }
 
+// ── Settings page ──────────────────────────────────────────
+function pageSettings() {
+  const f = S.settingsForm;
+  return `
+<div style="max-width:440px">
+  <div class="card">
+    <div class="ctitle">Сменить логин и пароль администратора</div>
+    ${S.settingsDone ? `<div class="alert-green" style="margin-bottom:14px">✓ Сохранено успешно</div>` : ""}
+    ${S.settingsError ? `<div class="alert-red" style="margin-bottom:14px">${esc(S.settingsError)}</div>` : ""}
+    <label>Новый логин</label>
+    <input id="s-username" type="text" placeholder="admin" value="${esc(f.username)}"/>
+    <label>Новый пароль</label>
+    <input id="s-password" type="password" placeholder="Минимум 4 символа" value="${esc(f.password)}"/>
+    <label>Повторите пароль</label>
+    <input id="s-password2" type="password" placeholder="Повторите пароль" value="${esc(f.password2)}"/>
+    <button class="btn-primary btn-full ${S.settingsBusy?"disabled":""}" id="btn-save-settings" ${S.settingsBusy?"disabled":""} style="margin-top:20px">
+      ${S.settingsBusy?`<span class="spinner"></span> Сохраняю...`:"Сохранить"}
+    </button>
+    <div style="margin-top:12px;font-size:12px;color:var(--text3)">
+      По умолчанию: логин <code>admin</code>, пароль <code>admin</code>
+    </div>
+  </div>
+</div>`;
+}
+
 // ── Modals ─────────────────────────────────────────────────
 function modalHtml() {
   if (S.modal === "add")    return modalAdd();
@@ -341,7 +378,8 @@ function modalDelete() {
 function bind() {
   // Login
   document.getElementById("btn-login")?.addEventListener("click", doLogin);
-  document.getElementById("login-token")?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+  document.getElementById("login-username")?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+  document.getElementById("login-password")?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
 
   // Logout
   document.getElementById("btn-logout")?.addEventListener("click", async () => {
@@ -350,8 +388,29 @@ function bind() {
   });
 
   // Navigation
-  document.getElementById("nav-managers")?.addEventListener("click", () => { S.selected=null; render(); });
+  document.getElementById("nav-managers")?.addEventListener("click", () => { S.page="managers"; S.selected=null; render(); });
+  document.getElementById("nav-settings")?.addEventListener("click", () => { S.page="settings"; S.selected=null; S.settingsForm={username:"",password:"",password2:""}; S.settingsError=""; S.settingsDone=false; render(); });
   document.getElementById("btn-back")?.addEventListener("click", () => { S.selected=null; render(); });
+
+  // Settings
+  document.getElementById("s-username")?.addEventListener("input",   e => { S.settingsForm.username=e.target.value; });
+  document.getElementById("s-password")?.addEventListener("input",   e => { S.settingsForm.password=e.target.value; });
+  document.getElementById("s-password2")?.addEventListener("input",  e => { S.settingsForm.password2=e.target.value; });
+  document.getElementById("btn-save-settings")?.addEventListener("click", async () => {
+    const username  = document.getElementById("s-username")?.value.trim()||"";
+    const password  = document.getElementById("s-password")?.value||"";
+    const password2 = document.getElementById("s-password2")?.value||"";
+    if (!username)                  { S.settingsError="Введите логин"; render(); return; }
+    if (!password)                  { S.settingsError="Введите пароль"; render(); return; }
+    if (password.length < 4)        { S.settingsError="Пароль минимум 4 символа"; render(); return; }
+    if (password !== password2)     { S.settingsError="Пароли не совпадают"; render(); return; }
+    S.settingsBusy=true; S.settingsError=""; S.settingsDone=false; render();
+    const res = await window.api.put("/api/auth/admin", { username, password });
+    S.settingsBusy=false;
+    if (res?.error) { S.settingsError=res.error; render(); return; }
+    S.settingsDone=true; S.settingsForm={username:"",password:"",password2:""}; render();
+    setTimeout(()=>{ S.settingsDone=false; render(); }, 3000);
+  });
 
   // Add manager button → open modal
   document.getElementById("btn-add-mgr")?.addEventListener("click", () => {
@@ -479,17 +538,17 @@ function bind() {
 // AUTH
 // ═══════════════════════════════════════════════════════════
 async function doLogin() {
-  const el = document.getElementById("login-token");
-  const token = el?.value.trim()||"";
-  if (!token) { S.loginError="Введите токен"; render(); return; }
+  const username = document.getElementById("login-username")?.value.trim()||"";
+  const password = document.getElementById("login-password")?.value||"";
+  if (!username || !password) { S.loginError="Введите логин и пароль"; render(); return; }
   S.loginBusy=true; S.loginError=""; render();
-  const res = await window.api.post("/api/auth/admin", { token });
+  const res = await window.api.post("/api/auth/admin", { username, password });
   S.loginBusy=false;
-  if (res?.error || !res?.ok) {
-    S.loginError = res?.error||"Неверный токен"; render(); return;
+  if (res?.error || !res?.token) {
+    S.loginError = res?.error||"Неверный логин или пароль"; render(); return;
   }
-  S.token = token;
-  await window.api.setToken(token);
+  S.token = res.token;
+  await window.api.setToken(res.token);
   load();
 }
 
@@ -599,6 +658,8 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(25
 .alert-banner{display:flex;align-items:flex-start;gap:14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:var(--rl);padding:14px 18px;color:var(--text)}
 .alert-icon{font-size:20px;flex-shrink:0;margin-top:1px}
 .alert-red{background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);color:#fca5a5;padding:10px 14px;border-radius:var(--r);font-size:13px}
+.alert-green{background:rgba(34,197,94,.08);border:1px solid rgba(34,197,94,.2);color:#4ade80;padding:10px 14px;border-radius:var(--r);font-size:13px}
+code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:2px 6px;border-radius:4px;color:var(--accent2)}
 
 /* Color picker */
 .color-row{display:flex;gap:8px;margin-top:8px;flex-wrap:wrap}

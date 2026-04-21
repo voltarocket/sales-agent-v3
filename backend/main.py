@@ -33,13 +33,8 @@ def verify_password(password: str, hashed: str) -> bool:
 def generate_token() -> str:
     return secrets.token_hex(32)
 
-ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")
-if not ADMIN_TOKEN:
-    ADMIN_TOKEN = secrets.token_hex(16)
-    print(f"[AUTH] ⚠ ADMIN_TOKEN not set — generated: {ADMIN_TOKEN}")
-    print(f"[AUTH]   Add ADMIN_TOKEN={ADMIN_TOKEN} to backend/.env to make it permanent")
-
-active_sessions: dict = {}  # token → manager_id
+active_sessions: dict = {}        # token → manager_id
+active_admin_sessions: dict = {}  # token → True
 
 
 def _get_token(req) -> str:
@@ -47,7 +42,7 @@ def _get_token(req) -> str:
     return auth.removeprefix("Bearer ").strip()
 
 def _is_admin(req) -> bool:
-    return _get_token(req) == ADMIN_TOKEN
+    return _get_token(req) in active_admin_sessions
 
 def _get_manager(req) -> Optional[dict]:
     mid = active_sessions.get(_get_token(req))
@@ -69,6 +64,10 @@ _db_lock = threading.Lock()
 _DEFAULT_DB = {
     "contacts": [],
     "calls": [],
+    "admin": {
+        "username": "admin",
+        "password_hash": hash_password("admin"),
+    },
     "managers": [
         {
             "id": 1,
@@ -102,6 +101,9 @@ db_data: dict = _load_db()
 for _k, _v in _DEFAULT_DB.items():
     if _k not in db_data:
         db_data[_k] = _v
+# migrate: add admin credentials if missing
+if "admin" not in db_data:
+    db_data["admin"] = {"username": "admin", "password_hash": hash_password("admin")}
 # migrate existing managers: add username/password if missing
 for _mgr in db_data.get("managers", []):
     if "username" not in _mgr:
@@ -401,8 +403,34 @@ async def auth_me(req: Request):
 @app.post("/api/auth/admin")
 async def auth_admin(req: Request):
     body = await req.json()
-    if body.get("token", "") != ADMIN_TOKEN:
-        raise HTTPException(401, {"error": "Неверный токен администратора"})
+    username = body.get("username", "").strip()
+    password = body.get("password", "")
+    adm = db_data.get("admin", {})
+    if username != adm.get("username", "admin"):
+        raise HTTPException(401, {"error": "Неверный логин или пароль"})
+    if not verify_password(password, adm.get("password_hash", hash_password("admin"))):
+        raise HTTPException(401, {"error": "Неверный логин или пароль"})
+    token = generate_token()
+    active_admin_sessions[token] = True
+    return {"ok": True, "token": token}
+
+
+@app.put("/api/auth/admin")
+async def update_admin_credentials(req: Request):
+    if not _is_admin(req):
+        raise HTTPException(401, {"error": "Требуется доступ администратора"})
+    body = await req.json()
+    new_username = body.get("username", "").strip()
+    new_password = body.get("password", "")
+    if not new_username:
+        raise HTTPException(400, {"error": "Логин не может быть пустым"})
+    if new_password and len(new_password) < 4:
+        raise HTTPException(400, {"error": "Пароль минимум 4 символа"})
+    adm = db_data.setdefault("admin", {})
+    adm["username"] = new_username
+    if new_password:
+        adm["password_hash"] = hash_password(new_password)
+    db_write()
     return {"ok": True}
 
 
@@ -410,6 +438,7 @@ async def auth_admin(req: Request):
 async def auth_logout(req: Request):
     token = _get_token(req)
     active_sessions.pop(token, None)
+    active_admin_sessions.pop(token, None)
     return {"ok": True}
 
 
