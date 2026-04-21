@@ -2,7 +2,13 @@
 // STATE
 // ═══════════════════════════════════════════════════════════
 const S = {
-  page:        "phone",   // phone | contacts | calls | managers | analytics
+  // Auth
+  token:       null,
+  currentUser: null,   // { id, name, username }
+  loginError:  "",
+  loginBusy:   false,
+
+  page:        "phone",   // phone | contacts | calls | analytics
   wsStatus:    "disconnected",
   recording:   false,
   seconds:     0,
@@ -34,6 +40,29 @@ const fmt = s => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).pad
 const sc  = s => s>=75?"#4ade80":s>=50?"#fbbf24":"#f87171";
 const vc  = (v,t) => v>=t?"#f87171":v>=t*.6?"#fbbf24":"#4ade80";
 const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+
+// ═══════════════════════════════════════════════════════════
+// AUTH
+// ═══════════════════════════════════════════════════════════
+async function doLogin() {
+  const uEl = document.getElementById("login-username");
+  const pEl = document.getElementById("login-password");
+  if (!uEl || !pEl) return;
+  const username = uEl.value.trim();
+  const password = pEl.value;
+  if (!username || !password) { S.loginError = "Введите логин и пароль"; render(); return; }
+  S.loginBusy = true; S.loginError = ""; render();
+  const res = await window.api.login({ username, password });
+  S.loginBusy = false;
+  if (res?.error || !res?.token) {
+    S.loginError = res?.error || "Ошибка входа"; render(); return;
+  }
+  S.token = res.token;
+  S.currentUser = { id: res.id, name: res.name };
+  S.managerId = res.id;
+  await window.api.setToken(res.token);
+  load();
+}
 
 // ═══════════════════════════════════════════════════════════
 // DATA LOADING
@@ -145,6 +174,7 @@ function render() {
 }
 
 function html() {
+  if (!S.token) return loginPage();
   return `
 <div class="shell">
   ${sidebar()}
@@ -154,12 +184,32 @@ function html() {
       ${S.page==="phone"     ? pagePhone()    : ""}
       ${S.page==="contacts"  ? pageContacts() : ""}
       ${S.page==="calls"     ? pageCalls()    : ""}
-      ${S.page==="managers"  ? pageManagers() : ""}
       ${S.page==="analytics" ? pageAnalytics(): ""}
     </div>
   </div>
 </div>
 ${S.modal ? modalHtml() : ""}`;
+}
+
+function loginPage() {
+  return `
+<div class="login-shell">
+  <div class="login-card">
+    <div class="login-logo">
+      <div class="logo-tag">Sales AI</div>
+      <div class="logo-h">Call Analyzer</div>
+    </div>
+    <div class="login-title">Вход в систему</div>
+    ${S.loginError ? `<div class="alert-red" style="margin-bottom:14px">${esc(S.loginError)}</div>` : ""}
+    <label>Логин</label>
+    <input id="login-username" type="text" placeholder="manager" autocomplete="username"/>
+    <label>Пароль</label>
+    <input id="login-password" type="password" placeholder="••••••" autocomplete="current-password"/>
+    <button class="btn-primary btn-full ${S.loginBusy?"disabled":""}" id="btn-login" ${S.loginBusy?"disabled":""} style="margin-top:20px">
+      ${S.loginBusy?`<span class="spinner"></span> Вхожу...`:"Войти"}
+    </button>
+  </div>
+</div>`;
 }
 
 // ── Sidebar ───────────────────────────────────────────────
@@ -178,7 +228,6 @@ function sidebar() {
   ${nav("phone","☎","Звонок")}
   ${nav("contacts","◈","Контакты",S.contacts.length||"")}
   ${nav("calls","◷","История",S.calls.length||"")}
-  ${nav("managers","◉","Менеджеры")}
   ${nav("analytics","⊕","Аналитика")}
   <div class="sip-section">
     ${S.recording?`<div class="call-active-bar"><span class="rec-dot"></span><span>Идёт разговор</span><span class="call-active-timer" id="sidebar-timer">${fmt(S.seconds)}</span></div>`:""}
@@ -192,10 +241,11 @@ function sidebar() {
 
 // ── Topbar ────────────────────────────────────────────────
 function topbar() {
-  const titles = { phone:"Звонок", contacts:"Контакты", calls:"История звонков", managers:"Менеджеры", analytics:"Аналитика" };
-  const subs   = { phone:"Запись и анализ разговора", contacts:`${S.contacts.length} клиентов в базе`, calls:`${S.calls.length} звонков`, managers:`${S.managers.length} менеджеров`, analytics:"Анализ текста" };
+  const titles = { phone:"Звонок", contacts:"Контакты", calls:"История звонков", analytics:"Аналитика" };
+  const subs   = { phone:"Запись и анализ разговора", contacts:`${S.contacts.length} клиентов в базе`, calls:`${S.calls.length} звонков`, analytics:"Анализ текста" };
   const callBadge = S.recording ? `<div class="topbar-call-badge"><span class="rec-dot"></span>Идёт разговор · <span id="topbar-timer">${fmt(S.seconds)}</span></div>` : "";
-  return `<div class="topbar"><div><div class="pt">${titles[S.page]}</div><div class="ps">${subs[S.page]}</div></div>${callBadge}</div>`;
+  const userBadge = S.currentUser ? `<div style="display:flex;align-items:center;gap:10px"><span style="font-size:12px;color:var(--text2)">${esc(S.currentUser.name)}</span><button class="btn-ghost btn-sm" id="btn-logout">Выйти</button></div>` : "";
+  return `<div class="topbar"><div><div class="pt">${titles[S.page]||""}</div><div class="ps">${subs[S.page]||""}</div></div><div style="display:flex;align-items:center;gap:14px">${callBadge}${userBadge}</div></div>`;
 }
 
 // ── Phone page ────────────────────────────────────────────
@@ -439,6 +489,15 @@ function modalHtml() {
 // EVENT BINDING
 // ═══════════════════════════════════════════════════════════
 function bind() {
+  // Login / logout
+  document.getElementById("btn-login")?.addEventListener("click", doLogin);
+  document.getElementById("login-password")?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+  document.getElementById("btn-logout")?.addEventListener("click", async () => {
+    await window.api.post("/api/auth/logout").catch(()=>{});
+    await window.api.setToken(null);
+    S.token=null; S.currentUser=null; S.managers=[]; S.calls=[]; S.contacts=[]; render();
+  });
+
   // Navigation
   document.querySelectorAll("[data-page]").forEach(el =>
     el.addEventListener("click", () => { S.page=el.dataset.page; render(); })
@@ -684,6 +743,12 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .eicon{font-size:30px;margin-bottom:10px}
 ::-webkit-scrollbar{width:4px}
 ::-webkit-scrollbar-thumb{background:var(--border2);border-radius:2px}
+
+/* Login */
+.login-shell{height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg)}
+.login-card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--rl);padding:36px 32px;width:360px}
+.login-logo{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
+.login-title{font-size:16px;font-weight:700;margin-bottom:20px}
 `;
 document.head.appendChild(style);
 

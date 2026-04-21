@@ -3,10 +3,12 @@
   "version": "3.0.0",
   "private": true,
   "scripts": {
-    "dev":         "concurrently \"npm run dev:backend\" \"npm run dev:desktop\" --names \"backend,desktop\" --prefix-colors \"cyan,magenta\"",
-    "dev:backend": "cd backend && npm run dev",
-    "dev:desktop": "cd desktop && npm start",
-    "install:all": "npm install && cd backend && pip install -r requirements.txt && cd ../desktop && npm install"
+    "dev":          "concurrently \"npm run dev:backend\" \"npm run dev:desktop\" --names \"backend,desktop\" --prefix-colors \"cyan,magenta\"",
+    "dev:all":      "concurrently \"npm run dev:backend\" \"npm run dev:desktop\" \"npm run dev:admin\" --names \"backend,client,admin\" --prefix-colors \"cyan,magenta,yellow\"",
+    "dev:backend":  "cd backend && npm run dev",
+    "dev:desktop":  "cd desktop && npm start",
+    "dev:admin":    "cd admin && npm start",
+    "install:all":  "npm install && cd backend && pip install -r requirements.txt && cd ../desktop && npm install && cd ../admin && npm install"
   },
   "devDependencies": { "concurrently": "^8.2.2" }
 }

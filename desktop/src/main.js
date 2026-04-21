@@ -8,6 +8,7 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3001";
 
 let mainWindow = null;
 let wsClient   = null;
+let authToken  = null;
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -68,8 +69,11 @@ ipcMain.handle("stop-recording", async () => {
 });
 
 // ── API proxy ──────────────────────────────────────────────
-async function api(endpoint, method="GET", body=null) {
-  const opts = { method, headers:{"Content-Type":"application/json"} };
+async function api(endpoint, method="GET", body=null, token=null) {
+  const t = token ?? authToken;
+  const headers = { "Content-Type": "application/json" };
+  if (t) headers["Authorization"] = `Bearer ${t}`;
+  const opts = { method, headers };
   if (body) opts.body = JSON.stringify(body);
   try {
     const r = await fetch(`${BACKEND_URL}${endpoint}`, opts);
@@ -77,7 +81,9 @@ async function api(endpoint, method="GET", body=null) {
   } catch(e) { return { error: e.message }; }
 }
 
-ipcMain.handle("api-get",    (_, endpoint)        => api(endpoint));
-ipcMain.handle("api-post",   (_, endpoint, body)   => api(endpoint,"POST",body));
-ipcMain.handle("api-put",    (_, endpoint, body)   => api(endpoint,"PUT",body));
-ipcMain.handle("api-delete", (_, endpoint)         => api(endpoint,"DELETE"));
+ipcMain.handle("api-get",      (_, endpoint)        => api(endpoint));
+ipcMain.handle("api-post",     (_, endpoint, body)   => api(endpoint,"POST",body));
+ipcMain.handle("api-put",      (_, endpoint, body)   => api(endpoint,"PUT",body));
+ipcMain.handle("api-delete",   (_, endpoint)         => api(endpoint,"DELETE"));
+ipcMain.handle("api-set-token",(_, token)            => { authToken = token; return { ok: true }; });
+ipcMain.handle("api-login",    (_, creds)            => api("/api/auth/login","POST",creds,null));

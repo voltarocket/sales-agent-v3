@@ -1,0 +1,24 @@
+{
+  "name": "sales-admin",
+  "version": "1.0.0",
+  "description": "Sales Admin Panel",
+  "main": "src/main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev":   "electron . --dev",
+    "build": "electron-builder"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "electron":         "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.sales.admin",
+    "productName": "Sales Admin",
+    "files": ["src/**/*"],
+    "win":   { "target": "nsis" },
+    "mac":   { "target": "dmg" },
+    "linux": { "target": "AppImage" }
+  }
+}

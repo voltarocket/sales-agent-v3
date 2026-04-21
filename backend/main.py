@@ -1,8 +1,10 @@
 import asyncio
+import hashlib
 import json
 import os
 import random
 import re
+import secrets
 import string
 import subprocess
 import threading
@@ -19,6 +21,45 @@ from fastapi.middleware.cors import CORSMiddleware
 load_dotenv()
 
 # ═══════════════════════════════════════════════════════════
+# AUTH UTILITIES
+# ═══════════════════════════════════════════════════════════
+
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest()
+
+def verify_password(password: str, hashed: str) -> bool:
+    return hashlib.sha256(password.encode("utf-8")).hexdigest() == hashed
+
+def generate_token() -> str:
+    return secrets.token_hex(32)
+
+ADMIN_TOKEN: str = os.getenv("ADMIN_TOKEN", "")
+if not ADMIN_TOKEN:
+    ADMIN_TOKEN = secrets.token_hex(16)
+    print(f"[AUTH] ⚠ ADMIN_TOKEN not set — generated: {ADMIN_TOKEN}")
+    print(f"[AUTH]   Add ADMIN_TOKEN={ADMIN_TOKEN} to backend/.env to make it permanent")
+
+active_sessions: dict = {}  # token → manager_id
+
+
+def _get_token(req) -> str:
+    auth = req.headers.get("Authorization", "")
+    return auth.removeprefix("Bearer ").strip()
+
+def _is_admin(req) -> bool:
+    return _get_token(req) == ADMIN_TOKEN
+
+def _get_manager(req) -> Optional[dict]:
+    mid = active_sessions.get(_get_token(req))
+    if mid is None:
+        return None
+    return next((m for m in db_data["managers"] if m["id"] == mid), None)
+
+def _safe_manager(m: dict) -> dict:
+    return {k: v for k, v in m.items() if k != "password_hash"}
+
+
+# ═══════════════════════════════════════════════════════════
 # DATABASE — JSON file with threading lock
 # ═══════════════════════════════════════════════════════════
 
@@ -32,6 +73,8 @@ _DEFAULT_DB = {
         {
             "id": 1,
             "name": "Менеджер",
+            "username": "manager",
+            "password_hash": hash_password("12345"),
             "avatar": "МН",
             "color": "#6366f1",
             "violations": 0,
@@ -59,6 +102,12 @@ db_data: dict = _load_db()
 for _k, _v in _DEFAULT_DB.items():
     if _k not in db_data:
         db_data[_k] = _v
+# migrate existing managers: add username/password if missing
+for _mgr in db_data.get("managers", []):
+    if "username" not in _mgr:
+        _mgr["username"] = f"manager{_mgr['id']}"
+    if "password_hash" not in _mgr:
+        _mgr["password_hash"] = hash_password("12345")
 _save_db(db_data)
 print("[DB] ready → sales.json")
 
@@ -325,6 +374,46 @@ def health():
 
 
 # ═══════════════════════════════════════════════════════════
+# ROUTES — AUTH
+# ═══════════════════════════════════════════════════════════
+
+@app.post("/api/auth/login")
+async def auth_login(req: Request):
+    body = await req.json()
+    username = body.get("username", "").strip()
+    password = body.get("password", "")
+    mgr = next((m for m in db_data["managers"] if m.get("username") == username), None)
+    if not mgr or not verify_password(password, mgr.get("password_hash", "")):
+        raise HTTPException(401, {"error": "Неверный логин или пароль"})
+    token = generate_token()
+    active_sessions[token] = mgr["id"]
+    return {"ok": True, "token": token, "id": mgr["id"], "name": mgr["name"]}
+
+
+@app.get("/api/auth/me")
+async def auth_me(req: Request):
+    mgr = _get_manager(req)
+    if not mgr:
+        raise HTTPException(401, {"error": "Unauthorized"})
+    return _safe_manager(mgr)
+
+
+@app.post("/api/auth/admin")
+async def auth_admin(req: Request):
+    body = await req.json()
+    if body.get("token", "") != ADMIN_TOKEN:
+        raise HTTPException(401, {"error": "Неверный токен администратора"})
+    return {"ok": True}
+
+
+@app.post("/api/auth/logout")
+async def auth_logout(req: Request):
+    token = _get_token(req)
+    active_sessions.pop(token, None)
+    return {"ok": True}
+
+
+# ═══════════════════════════════════════════════════════════
 # ROUTES — SIP CONFIG
 # ═══════════════════════════════════════════════════════════
 
@@ -555,18 +644,32 @@ async def delete_contact(contact_id: int):
 
 @app.get("/api/managers")
 def get_managers():
-    return db_data["managers"]
+    return [_safe_manager(m) for m in db_data["managers"]]
 
 
 @app.post("/api/managers")
 async def create_manager(req: Request):
+    if not _is_admin(req):
+        raise HTTPException(401, {"error": "Требуется доступ администратора"})
     body = await req.json()
-    name = body.get("name", "")
+    name = body.get("name", "").strip()
+    username = body.get("username", "").strip()
+    password = body.get("password", "")
     color = body.get("color", "#6366f1")
-    initials = "".join(w[0] for w in name.strip().split() if w).upper()[:2]
+    if not name:
+        raise HTTPException(400, {"error": "Имя обязательно"})
+    if not username:
+        raise HTTPException(400, {"error": "Логин обязателен"})
+    if not password:
+        raise HTTPException(400, {"error": "Пароль обязателен"})
+    if next((m for m in db_data["managers"] if m.get("username") == username), None):
+        raise HTTPException(400, {"error": "Логин уже занят"})
+    initials = "".join(w[0] for w in name.split() if w).upper()[:2]
     mgr = {
         "id": next_id(db_data["managers"]),
-        "name": name.strip(),
+        "name": name,
+        "username": username,
+        "password_hash": hash_password(password),
         "avatar": initials,
         "color": color,
         "violations": 0,
@@ -576,6 +679,40 @@ async def create_manager(req: Request):
     db_data["managers"].append(mgr)
     db_write()
     return {"ok": True, "id": mgr["id"]}
+
+
+@app.put("/api/managers/{manager_id}")
+async def update_manager(manager_id: int, req: Request):
+    if not _is_admin(req):
+        raise HTTPException(401, {"error": "Требуется доступ администратора"})
+    mgr = next((m for m in db_data["managers"] if m["id"] == manager_id), None)
+    if not mgr:
+        raise HTTPException(404, {"error": "Not found"})
+    body = await req.json()
+    if "name" in body and body["name"].strip():
+        mgr["name"] = body["name"].strip()
+        mgr["avatar"] = "".join(w[0] for w in mgr["name"].split() if w).upper()[:2]
+    if "username" in body:
+        new_uname = body["username"].strip()
+        if new_uname != mgr["username"]:
+            if next((m for m in db_data["managers"] if m.get("username") == new_uname and m["id"] != manager_id), None):
+                raise HTTPException(400, {"error": "Логин уже занят"})
+            mgr["username"] = new_uname
+    if "password" in body and body["password"]:
+        mgr["password_hash"] = hash_password(body["password"])
+    if "color" in body:
+        mgr["color"] = body["color"]
+    db_write()
+    return {"ok": True}
+
+
+@app.delete("/api/managers/{manager_id}")
+async def delete_manager(manager_id: int, req: Request):
+    if not _is_admin(req):
+        raise HTTPException(401, {"error": "Требуется доступ администратора"})
+    db_data["managers"] = [m for m in db_data["managers"] if m["id"] != manager_id]
+    db_write()
+    return {"ok": True}
 
 
 @app.post("/api/managers/{manager_id}/stats")
