@@ -9,18 +9,25 @@ const S = {
   page:     "managers",   // managers | settings
   managers: [],
   calls:    [],
-  selected: null,   // selected manager object
-  modal:    null,   // null | "add" | "edit" | "confirm-delete"
+  selected: null,         // selected manager object
+  mgrCalls: [],           // calls loaded for selected manager
+  modal:    null,         // null | "add" | "edit" | "delete"
   pendingDeleteId: null,
 
-  form: { name:"", username:"", password:"", color:"#6366f1" },
+  activeAudioCallId: null,
+  commentDraft:      {},  // callId → string
+  savingCommentId:   null,
+
+  form:     { name:"", username:"", password:"", color:"#6366f1" },
   editForm: { name:"", username:"", password:"", color:"" },
-  settingsForm: { username:"", password:"", password2:"" },
+  settingsForm: { username:"", password:"", password2:"", threshold:"" },
   settingsError: "",
-  settingsDone: false,
-  settingsBusy: false,
+  settingsDone:  false,
+  settingsBusy:  false,
   formError: "",
-  formBusy: false,
+  formBusy:  false,
+
+  threshold: 5,
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -29,7 +36,7 @@ const S = {
 const esc = s => (s||"").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 const sc  = s => s>=75?"#4ade80":s>=50?"#fbbf24":"#f87171";
 const vc  = (v,t) => v>=t?"#f87171":v>=t*.6?"#fbbf24":"#4ade80";
-const THRESHOLD = 5;
+const fmt = s => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(s%60).padStart(2,"0")}`;
 
 const COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#8b5cf6","#06b6d4"];
 
@@ -37,11 +44,19 @@ const COLORS = ["#6366f1","#ec4899","#f59e0b","#10b981","#3b82f6","#ef4444","#8b
 // DATA
 // ═══════════════════════════════════════════════════════════
 async function load() {
-  [S.managers, S.calls] = await Promise.all([
+  const [managers, calls, settings] = await Promise.all([
     window.api.get("/api/managers").catch(()=>[]),
     window.api.get("/api/calls").catch(()=>[]),
+    window.api.get("/api/settings").catch(()=>({})),
   ]);
+  S.managers  = managers;
+  S.calls     = calls;
+  S.threshold = settings?.violations_threshold ?? 5;
   render();
+}
+
+async function loadMgrCalls(mgrId) {
+  S.mgrCalls = await window.api.get(`/api/managers/${mgrId}/calls`).catch(()=>[]);
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -115,7 +130,7 @@ function sidebar() {
       </div>
       <div class="stat-mini-row">
         <span class="stat-mini-lbl">С нарушениями</span>
-        <span class="stat-mini-val" style="color:#f87171">${S.managers.filter(m=>(m.violations||0)>=THRESHOLD).length}</span>
+        <span class="stat-mini-val" style="color:#f87171">${S.managers.filter(m=>(m.violations||0)>=S.threshold).length}</span>
       </div>
     </div>
     <button class="btn-ghost btn-sm btn-full" id="btn-logout" style="margin-top:10px">Выйти</button>
@@ -127,7 +142,7 @@ function sidebar() {
 function topbar() {
   if (S.page === "settings") return `
 <div class="topbar">
-  <div><div class="pt">Настройки</div><div class="ps">Учётные данные администратора</div></div>
+  <div><div class="pt">Настройки</div><div class="ps">Учётные данные администратора и конфигурация</div></div>
 </div>`;
   const title = S.selected ? esc(S.selected.name) : "Менеджеры";
   const sub   = S.selected
@@ -153,7 +168,7 @@ function pageManagers() {
   <small>Нажмите «+ Добавить менеджера»</small>
 </div>`;
 
-  const alertMgrs = S.managers.filter(m=>(m.violations||0)>=THRESHOLD);
+  const alertMgrs = S.managers.filter(m=>(m.violations||0)>=S.threshold);
   return `
 <div style="display:flex;flex-direction:column;gap:20px">
   ${alertMgrs.length ? `
@@ -171,9 +186,8 @@ function pageManagers() {
 }
 
 function managerCard(m) {
-  const v = m.violations||0;
-  const pct = Math.min(100, Math.round(v/THRESHOLD*100));
-  const callsForMgr = S.calls.filter(c=>c.manager_id===m.id||false).length;
+  const v   = m.violations||0;
+  const pct = Math.min(100, Math.round(v/S.threshold*100));
   return `
 <div class="mcard" data-mgr="${m.id}">
   <div class="mhd">
@@ -193,7 +207,7 @@ function managerCard(m) {
       <div class="slbl">ЗВОНКОВ</div>
     </div>
     <div class="sbox">
-      <div class="sval" style="color:${vc(v,THRESHOLD)}">${v}</div>
+      <div class="sval" style="color:${vc(v,S.threshold)}">${v}</div>
       <div class="slbl">НАРУШ.</div>
     </div>
     <div class="sbox">
@@ -204,13 +218,13 @@ function managerCard(m) {
   <div class="vbar-wrap">
     <div class="vbar-hd">
       <span style="font-size:11px;color:var(--text2)">Нарушения</span>
-      <span style="font-size:11px;font-family:var(--mono);color:${vc(v,THRESHOLD)}">${v}/${THRESHOLD}</span>
+      <span style="font-size:11px;font-family:var(--mono);color:${vc(v,S.threshold)}">${v}/${S.threshold}</span>
     </div>
-    <div class="vbar-track"><div class="vbar-fill" style="width:${pct}%;background:${vc(v,THRESHOLD)}"></div></div>
+    <div class="vbar-track"><div class="vbar-fill" style="width:${pct}%;background:${vc(v,S.threshold)}"></div></div>
   </div>
-  ${v>=THRESHOLD ? `<div class="alert-red" style="margin-top:10px;font-size:12px">⚠ Превышен порог нарушений</div>` : ""}
+  ${v>=S.threshold ? `<div class="alert-red" style="margin-top:10px;font-size:12px">⚠ Превышен порог нарушений</div>` : ""}
   <div style="display:flex;gap:6px;margin-top:10px">
-    <button class="btn-ghost btn-sm" style="flex:1" data-reset-mgr="${m.id}">Сброс статистики</button>
+    <button class="btn-ghost btn-sm" style="flex:1" data-reset-mgr="${m.id}">Сброс</button>
     <button class="btn-ghost btn-sm" style="flex:1" data-view-mgr="${m.id}">Детали →</button>
   </div>
 </div>`;
@@ -218,10 +232,9 @@ function managerCard(m) {
 
 // ── Manager detail ─────────────────────────────────────────
 function pageManagerDetail() {
-  const m = S.selected;
-  const v = m.violations||0;
-  const pct = Math.min(100, Math.round(v/THRESHOLD*100));
-  const mgrCalls = S.calls.filter(c=>c.manager_id===m.id);
+  const m   = S.selected;
+  const v   = m.violations||0;
+  const pct = Math.min(100, Math.round(v/S.threshold*100));
 
   return `
 <div style="display:flex;flex-direction:column;gap:16px">
@@ -234,14 +247,13 @@ function pageManagerDetail() {
       </div>
       <div style="display:flex;gap:8px">
         <button class="btn-ghost btn-sm" data-edit-mgr="${m.id}">✎ Редактировать</button>
-        <button class="btn-red btn-sm" data-delete-mgr="${m.id}">Удалить</button>
       </div>
     </div>
   </div>
 
   <div class="detail-stats">
     <div class="stat-card"><div class="stat-val" style="color:#a5b4fc">${m.calls_count||0}</div><div class="stat-lbl">Всего звонков</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:${vc(v,THRESHOLD)}">${v}</div><div class="stat-lbl">Нарушений</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${vc(v,S.threshold)}">${v}</div><div class="stat-lbl">Нарушений</div></div>
     <div class="stat-card"><div class="stat-val" style="color:#4ade80">${m.avg_score!=null?m.avg_score:"—"}</div><div class="stat-lbl">Средняя оценка</div></div>
   </div>
 
@@ -250,26 +262,59 @@ function pageManagerDetail() {
     <div class="vbar-wrap">
       <div class="vbar-hd">
         <span>Нарушения</span>
-        <span style="font-family:var(--mono);color:${vc(v,THRESHOLD)}">${v} / ${THRESHOLD}</span>
+        <span style="font-family:var(--mono);color:${vc(v,S.threshold)}">${v} / ${S.threshold}</span>
       </div>
-      <div class="vbar-track" style="height:8px"><div class="vbar-fill" style="width:${pct}%;background:${vc(v,THRESHOLD)}"></div></div>
+      <div class="vbar-track" style="height:8px"><div class="vbar-fill" style="width:${pct}%;background:${vc(v,S.threshold)}"></div></div>
     </div>
-    ${v>=THRESHOLD?`<div class="alert-red" style="margin-top:12px">⚠ Порог нарушений превышен — требуется внимание руководителя</div>`:""}
+    ${v>=S.threshold?`<div class="alert-red" style="margin-top:12px">⚠ Порог нарушений превышен — требуется внимание руководителя</div>`:""}
     <button class="btn-ghost btn-sm" data-reset-mgr="${m.id}" style="margin-top:12px">Сбросить статистику</button>
   </div>
 
-  <div class="card">
-    <div class="ctitle">Последние звонки (${mgrCalls.length})</div>
-    ${mgrCalls.length ? mgrCalls.slice(0,10).map(c=>`
-    <div class="call-row">
-      <div class="call-meta">
-        <span class="call-ph">${esc(c.phone||"—")}</span>
-        <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${(c.created_at||"").slice(0,16)}</span>
-        ${c.score!=null?`<span class="score-chip" style="color:${sc(c.score)}">${c.score}/100</span>`:""}
-        ${(c.errors||[]).length?`<span style="font-size:11px;color:#f87171;font-family:var(--mono)">${c.errors.length} ошиб.</span>`:""}
-      </div>
-      ${c.summary?`<div class="call-sum">${esc(c.summary.slice(0,100))}${c.summary.length>100?"...":""}</div>`:""}
-    </div>`).join("") : `<div class="empty-sm">Звонков пока нет</div>`}
+  <div>
+    <div class="ctitle" style="margin-bottom:12px">Записи звонков (${S.mgrCalls.length})</div>
+    ${!S.mgrCalls.length ? `<div class="empty-sm">Звонков пока нет</div>` : S.mgrCalls.map(c => callCard(c)).join("")}
+  </div>
+</div>`;
+}
+
+function callCard(c) {
+  const draft = S.commentDraft[c.id] !== undefined ? S.commentDraft[c.id] : (c.adminComment||"");
+  const saving = S.savingCommentId === c.id;
+  const errHtml = (c.errors||[]).map(e=>`
+<div class="err-item">
+  <span class="sev sev-${e.severity||"low"}">${e.severity==="high"?"Критично":e.severity==="medium"?"Средне":"Мало"}</span>
+  <div><div class="err-t">${esc(e.title)}</div><div class="err-d">${esc(e.description)}</div></div>
+</div>`).join("");
+  const posHtml = (c.positives||[]).map(p=>`<div class="pos-item">+ ${esc(p)}</div>`).join("");
+  const isAudioOpen = S.activeAudioCallId === c.id;
+
+  return `
+<div class="call-card">
+  <div class="call-meta" style="margin-bottom:10px">
+    <span class="call-ph">${esc(c.phone||"—")}</span>
+    <span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${(c.created_at||"").slice(0,16)}</span>
+    ${c.duration?`<span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${fmt(c.duration)}</span>`:""}
+    ${c.score!=null?`<span class="score-chip" style="color:${sc(c.score)}">${c.score}/100</span>`:""}
+    <span class="ctag ${c.saved?"ctag-saved":"ctag-anl"}">${c.saved?"→ контакт":"аналитика"}</span>
+    ${c.audioFile?`<button class="btn-ghost btn-sm" data-play="${c.id}" data-af="${esc(c.audioFile)}" style="margin-left:auto">${isAudioOpen?"■ Закрыть":"▶ Запись"}</button>`:""}
+  </div>
+  ${isAudioOpen?`<div style="margin-bottom:10px"><audio id="audio-${c.id}" controls style="width:100%;height:32px"></audio></div>`:""}
+  ${c.summary?`<div class="call-sum" style="margin-bottom:8px">${esc(c.summary)}</div>`:""}
+  ${errHtml?`<div class="err-list" style="margin-bottom:8px">${errHtml}</div>`:""}
+  ${posHtml?`<div style="margin-bottom:8px">${posHtml}</div>`:""}
+  ${c.recommendation?`<div class="rec-box" style="margin-bottom:8px">💡 ${esc(c.recommendation)}</div>`:""}
+  ${c.transcript?`
+  <details style="margin-bottom:10px">
+    <summary style="cursor:pointer;font-size:12px;color:var(--text2);user-select:none;padding:4px 0">Транскрипт</summary>
+    <div class="transcript-box" style="margin-top:6px">${esc(c.transcript)}</div>
+  </details>`:""}
+  <div style="margin-top:8px">
+    <label style="font-size:11px;color:var(--text3);margin-bottom:4px;display:block">Комментарий администратора</label>
+    <textarea class="comment-ta" data-comment-id="${c.id}" rows="2" placeholder="Введите комментарий по результатам ручной проверки...">${esc(draft)}</textarea>
+    <button class="btn-ghost btn-sm ${saving?"disabled":""}" data-save-comment="${c.id}" ${saving?"disabled":""} style="margin-top:6px">
+      ${saving?`<span class="spinner"></span> Сохраняю...`:"Сохранить комментарий"}
+    </button>
+    ${c.adminComment&&S.commentDraft[c.id]===undefined?`<span style="font-size:11px;color:#4ade80;margin-left:8px">✓ Сохранён</span>`:""}
   </div>
 </div>`;
 }
@@ -278,7 +323,14 @@ function pageManagerDetail() {
 function pageSettings() {
   const f = S.settingsForm;
   return `
-<div style="max-width:440px">
+<div style="display:flex;flex-direction:column;gap:18px;max-width:440px">
+  <div class="card">
+    <div class="ctitle">Порог уведомлений о нарушениях</div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Администратор получает уведомление, когда число нарушений менеджера кратно этому числу.</p>
+    <label>Количество нарушений для уведомления</label>
+    <input id="s-threshold" type="number" min="1" max="100" value="${S.threshold}" style="width:120px"/>
+    <button class="btn-primary" id="btn-save-threshold" style="margin-top:14px">Сохранить порог</button>
+  </div>
   <div class="card">
     <div class="ctitle">Сменить логин и пароль администратора</div>
     ${S.settingsDone ? `<div class="alert-green" style="margin-bottom:14px">✓ Сохранено успешно</div>` : ""}
@@ -290,7 +342,7 @@ function pageSettings() {
     <label>Повторите пароль</label>
     <input id="s-password2" type="password" placeholder="Повторите пароль" value="${esc(f.password2)}"/>
     <button class="btn-primary btn-full ${S.settingsBusy?"disabled":""}" id="btn-save-settings" ${S.settingsBusy?"disabled":""} style="margin-top:20px">
-      ${S.settingsBusy?`<span class="spinner"></span> Сохраняю...`:"Сохранить"}
+      ${S.settingsBusy?`<span class="spinner"></span> Сохраняю...`:"Сохранить учётные данные"}
     </button>
     <div style="margin-top:12px;font-size:12px;color:var(--text3)">
       По умолчанию: логин <code>admin</code>, пароль <code>admin</code>
@@ -388,11 +440,27 @@ function bind() {
   });
 
   // Navigation
-  document.getElementById("nav-managers")?.addEventListener("click", () => { S.page="managers"; S.selected=null; render(); });
-  document.getElementById("nav-settings")?.addEventListener("click", () => { S.page="settings"; S.selected=null; S.settingsForm={username:"",password:"",password2:""}; S.settingsError=""; S.settingsDone=false; render(); });
-  document.getElementById("btn-back")?.addEventListener("click", () => { S.selected=null; render(); });
+  document.getElementById("nav-managers")?.addEventListener("click", () => {
+    S.page="managers"; S.selected=null; S.mgrCalls=[]; render();
+  });
+  document.getElementById("nav-settings")?.addEventListener("click", () => {
+    S.page="settings"; S.selected=null; S.mgrCalls=[];
+    S.settingsForm={username:"",password:"",password2:""}; S.settingsError=""; S.settingsDone=false; render();
+  });
+  document.getElementById("btn-back")?.addEventListener("click", () => {
+    S.selected=null; S.mgrCalls=[]; S.activeAudioCallId=null; render();
+  });
 
-  // Settings
+  // Settings — threshold
+  document.getElementById("btn-save-threshold")?.addEventListener("click", async () => {
+    const val = parseInt(document.getElementById("s-threshold")?.value)||5;
+    const t   = Math.max(1, Math.min(100, val));
+    await window.api.put("/api/settings", { violations_threshold: t });
+    S.threshold = t;
+    render();
+  });
+
+  // Settings — admin credentials
   document.getElementById("s-username")?.addEventListener("input",   e => { S.settingsForm.username=e.target.value; });
   document.getElementById("s-password")?.addEventListener("input",   e => { S.settingsForm.password=e.target.value; });
   document.getElementById("s-password2")?.addEventListener("input",  e => { S.settingsForm.password2=e.target.value; });
@@ -400,10 +468,10 @@ function bind() {
     const username  = document.getElementById("s-username")?.value.trim()||"";
     const password  = document.getElementById("s-password")?.value||"";
     const password2 = document.getElementById("s-password2")?.value||"";
-    if (!username)                  { S.settingsError="Введите логин"; render(); return; }
-    if (!password)                  { S.settingsError="Введите пароль"; render(); return; }
-    if (password.length < 4)        { S.settingsError="Пароль минимум 4 символа"; render(); return; }
-    if (password !== password2)     { S.settingsError="Пароли не совпадают"; render(); return; }
+    if (!username)              { S.settingsError="Введите логин"; render(); return; }
+    if (!password)              { S.settingsError="Введите пароль"; render(); return; }
+    if (password.length < 4)    { S.settingsError="Пароль минимум 4 символа"; render(); return; }
+    if (password !== password2) { S.settingsError="Пароли не совпадают"; render(); return; }
     S.settingsBusy=true; S.settingsError=""; S.settingsDone=false; render();
     const res = await window.api.put("/api/auth/admin", { username, password });
     S.settingsBusy=false;
@@ -412,7 +480,7 @@ function bind() {
     setTimeout(()=>{ S.settingsDone=false; render(); }, 3000);
   });
 
-  // Add manager button → open modal
+  // Add manager button
   document.getElementById("btn-add-mgr")?.addEventListener("click", () => {
     S.form = { name:"", username:"", password:"", color:"#6366f1" };
     S.formError=""; S.modal="add"; render();
@@ -422,17 +490,15 @@ function bind() {
   document.querySelectorAll("[data-mgr]").forEach(el =>
     el.addEventListener("click", e => {
       if (e.target.closest("[data-edit-mgr],[data-delete-mgr],[data-reset-mgr],[data-view-mgr]")) return;
-      const m = S.managers.find(x=>x.id===+el.dataset.mgr);
-      if (m) { S.selected=m; render(); }
+      openManagerDetail(+el.dataset.mgr);
     })
   );
 
-  // View detail
+  // View detail button
   document.querySelectorAll("[data-view-mgr]").forEach(el =>
     el.addEventListener("click", e => {
       e.stopPropagation();
-      const m = S.managers.find(x=>x.id===+el.dataset.viewMgr);
-      if (m) { S.selected=m; render(); }
+      openManagerDetail(+el.dataset.viewMgr);
     })
   );
 
@@ -468,6 +534,48 @@ function bind() {
       render();
     })
   );
+
+  // Play audio
+  document.querySelectorAll("[data-play]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const callId    = parseInt(btn.dataset.play);
+      const audioFile = btn.dataset.af;
+      if (S.activeAudioCallId === callId) {
+        S.activeAudioCallId = null; render(); return;
+      }
+      S.activeAudioCallId = callId; render();
+      const buf = await window.api.getAudioData(audioFile);
+      if (!buf) { alert("Файл записи не найден"); S.activeAudioCallId=null; render(); return; }
+      const blob = new Blob([buf], { type:"audio/webm" });
+      const url  = URL.createObjectURL(blob);
+      const el   = document.getElementById(`audio-${callId}`);
+      if (el) { el.src=url; el.play().catch(()=>{}); }
+    });
+  });
+
+  // Comment textarea — track draft
+  document.querySelectorAll(".comment-ta").forEach(ta => {
+    ta.addEventListener("input", e => {
+      S.commentDraft[+ta.dataset.commentId] = e.target.value;
+    });
+  });
+
+  // Save comment
+  document.querySelectorAll("[data-save-comment]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const callId = parseInt(btn.dataset.saveComment);
+      const text   = S.commentDraft[callId] !== undefined
+        ? S.commentDraft[callId]
+        : (S.mgrCalls.find(c=>c.id===callId)?.adminComment||"");
+      S.savingCommentId = callId; render();
+      await window.api.put(`/api/calls/${callId}/comment`, { adminComment: text });
+      // Update local mgrCalls record
+      const call = S.mgrCalls.find(c=>c.id===callId);
+      if (call) call.adminComment = text;
+      delete S.commentDraft[callId];
+      S.savingCommentId = null; render();
+    });
+  });
 
   // Modal close
   document.getElementById("modal-close")?.addEventListener("click",  () => { S.modal=null; render(); });
@@ -528,10 +636,21 @@ function bind() {
   document.getElementById("btn-confirm-delete")?.addEventListener("click", async () => {
     const res = await window.api.delete(`/api/managers/${S.pendingDeleteId}`);
     if (res?.error) { alert(res.error); return; }
-    if (S.selected?.id === S.pendingDeleteId) S.selected=null;
+    if (S.selected?.id === S.pendingDeleteId) { S.selected=null; S.mgrCalls=[]; }
     S.modal=null; S.pendingDeleteId=null;
     await load();
   });
+}
+
+async function openManagerDetail(mgrId) {
+  const m = S.managers.find(x=>x.id===mgrId);
+  if (!m) return;
+  S.selected          = m;
+  S.activeAudioCallId = null;
+  S.commentDraft      = {};
+  render();
+  await loadMgrCalls(mgrId);
+  render();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -601,14 +720,15 @@ html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text);fon
 /* Form */
 label{font-size:12px;color:var(--text2);display:block;margin-bottom:5px;margin-top:12px}
 label:first-of-type{margin-top:0}
-input,select{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);font-family:var(--sans);font-size:13px;padding:9px 12px;outline:none;transition:border .15s}
-input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,255,255,.15)}
+input,select,textarea{width:100%;background:var(--surface2);border:1px solid var(--border2);border-radius:var(--r);color:var(--text);font-family:var(--sans);font-size:13px;padding:9px 12px;outline:none;transition:border .15s}
+input:focus,select:focus,textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(255,255,255,.15)}
+textarea{resize:vertical;font-size:12px;line-height:1.5}
 
 /* Buttons */
 .btn-primary{background:var(--accent);color:#0a0a0f;border:none;border-radius:var(--r);padding:10px 20px;font-size:13px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;justify-content:center;gap:8px}
 .btn-primary:hover{background:var(--accent2)}
 .btn-full{width:100%}
-.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border2);border-radius:var(--r);padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s}
+.btn-ghost{background:transparent;color:var(--text2);border:1px solid var(--border2);border-radius:var(--r);padding:7px 14px;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:6px}
 .btn-ghost:hover{border-color:var(--accent);color:var(--accent2)}
 .btn-red{background:rgba(239,68,68,.12);color:#f87171;border:1px solid rgba(239,68,68,.2);border-radius:var(--r);padding:7px 14px;font-size:13px;font-weight:600;cursor:pointer}
 .btn-red:hover{background:rgba(239,68,68,.22)}
@@ -645,14 +765,32 @@ input:focus,select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(25
 .stat-val{font-size:32px;font-weight:700;font-family:var(--mono)}
 .stat-lbl{font-size:12px;color:var(--text2);margin-top:4px}
 
-/* Calls */
-.call-row{padding:8px 0;border-bottom:.5px solid var(--border)}
-.call-row:last-child{border-bottom:none}
-.call-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px}
+/* Call cards */
+.call-card{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:14px 16px;margin-bottom:10px}
+.call-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
 .call-ph{font-family:var(--mono);font-size:13px;font-weight:500}
 .call-sum{font-size:12px;color:var(--text2);line-height:1.5}
 .score-chip{font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;font-family:var(--mono)}
+.ctag{font-size:11px;padding:2px 8px;border-radius:20px;font-family:var(--mono)}
+.ctag-saved{background:rgba(255,255,255,.15);color:var(--accent2)}
+.ctag-anl{background:var(--surface2);color:var(--text3)}
 .empty-sm{font-size:12px;color:var(--text3);padding:12px 0}
+audio{border-radius:6px;background:var(--surface2)}
+.transcript-box{font-size:12px;font-family:var(--mono);color:var(--text2);line-height:1.7;max-height:200px;overflow-y:auto;background:var(--surface2);padding:10px 14px;border-radius:var(--r)}
+details summary::-webkit-details-marker{color:var(--text3)}
+.comment-ta{font-family:var(--sans);font-size:12px;line-height:1.5;padding:8px 12px}
+
+/* Errors/positives */
+.err-list{display:flex;flex-direction:column;gap:6px}
+.err-item{display:flex;gap:8px;align-items:flex-start;padding:7px 10px;background:var(--surface2);border-radius:var(--r);border:1px solid var(--border)}
+.sev{font-size:10px;font-weight:600;padding:2px 7px;border-radius:20px;white-space:nowrap;flex-shrink:0;margin-top:2px;font-family:var(--mono)}
+.sev-high{background:#fee2e2;color:#991b1b}
+.sev-medium{background:#fef3c7;color:#92400e}
+.sev-low{background:#dcfce7;color:#166534}
+.err-t{font-size:12px;font-weight:500}
+.err-d{font-size:11px;color:var(--text2);margin-top:2px}
+.pos-item{font-size:12px;color:#4ade80;padding:4px 10px;background:rgba(34,197,94,.06);border-radius:var(--r);border-left:2px solid #22c55e;margin-bottom:4px}
+.rec-box{padding:10px 12px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.15);border-radius:var(--r);font-size:12px;color:var(--accent2);line-height:1.6}
 
 /* Alert banner */
 .alert-banner{display:flex;align-items:flex-start;gap:14px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.2);border-radius:var(--rl);padding:14px 18px;color:var(--text)}
@@ -683,10 +821,9 @@ code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:2
 .login-card{background:var(--surface);border:1px solid var(--border2);border-radius:var(--rl);padding:36px 32px;width:380px}
 .login-logo{margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--border)}
 .login-title{font-size:16px;font-weight:700;margin-bottom:8px}
-.login-hint{font-size:12px;color:var(--text3);line-height:1.6;margin-bottom:20px}
 
 /* Spinner */
-.spinner{width:16px;height:16px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
+.spinner{width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .6s linear infinite;display:inline-block}
 @keyframes spin{to{transform:rotate(360deg)}}
 
 /* Misc */

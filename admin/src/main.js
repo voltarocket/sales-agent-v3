@@ -12,8 +12,9 @@ let adminToken = null;
 // LOCAL DATABASE — shared with desktop app
 // ═══════════════════════════════════════════════════════════
 
-const SHARED_DIR = path.join(app.getPath("appData"), "SalesCallAnalyzer");
-const DB_PATH    = path.join(SHARED_DIR, "sales.json");
+const SHARED_DIR      = path.join(app.getPath("appData"), "SalesCallAnalyzer");
+const DB_PATH         = path.join(SHARED_DIR, "sales.json");
+const RECORDINGS_DIR  = path.join(SHARED_DIR, "recordings");
 
 fs.mkdirSync(SHARED_DIR, { recursive: true });
 
@@ -81,7 +82,8 @@ function isLocalEndpoint(endpoint) {
     endpoint.startsWith("/api/auth") ||
     endpoint.startsWith("/api/calls") ||
     endpoint.startsWith("/api/contacts") ||
-    endpoint.startsWith("/api/managers")
+    endpoint.startsWith("/api/managers") ||
+    endpoint.startsWith("/api/settings")
   );
 }
 
@@ -117,10 +119,28 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true };
   }
 
-  // ── CALLS (read-only for admin) ─────────────────────────
+  // ── CALLS ───────────────────────────────────────────────
   if (endpoint === "/api/calls" && method === "GET") {
-    loadDB(); // always fresh
+    loadDB();
     return [...db.calls].reverse();
+  }
+
+  // GET /api/managers/:id/calls
+  if (seg.length === 4 && seg[1] === "managers" && seg[3] === "calls" && method === "GET") {
+    loadDB();
+    const mgrId = parseInt(seg[2]);
+    return [...db.calls].filter(c => c.managerId === mgrId).reverse();
+  }
+
+  // PUT /api/calls/:id/comment
+  if (seg.length === 4 && seg[1] === "calls" && seg[3] === "comment" && method === "PUT") {
+    if (!adminSessions[token]) return { error: "Требуется доступ администратора" };
+    loadDB();
+    const call = db.calls.find(c => c.id === parseInt(seg[2]));
+    if (!call) return { error: "Not found" };
+    call.adminComment = (body || {}).adminComment || "";
+    saveDB();
+    return { ok: true };
   }
 
   // ── CONTACTS (read-only for admin) ──────────────────────
@@ -194,6 +214,20 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true };
   }
 
+  // ── SETTINGS ─────────────────────────────────────────────
+  if (endpoint === "/api/settings" && method === "GET") {
+    loadDB();
+    return db.settings || { violations_threshold: 5 };
+  }
+
+  if (endpoint === "/api/settings" && method === "PUT") {
+    if (!adminSessions[token]) return { error: "Требуется доступ администратора" };
+    loadDB();
+    db.settings = { ...(db.settings || {}), ...(body || {}) };
+    saveDB();
+    return { ok: true };
+  }
+
   return null;
 }
 
@@ -244,3 +278,11 @@ ipcMain.handle("api-post",      (_, ep, body) => apiCall(ep, "POST", body));
 ipcMain.handle("api-put",       (_, ep, body) => apiCall(ep, "PUT", body));
 ipcMain.handle("api-delete",    (_, ep)       => apiCall(ep, "DELETE"));
 ipcMain.handle("api-set-token", (_, token)    => { adminToken = token; return { ok: true }; });
+
+ipcMain.handle("get-audio-data", (_, filename) => {
+  try {
+    const p = path.join(RECORDINGS_DIR, filename);
+    if (!fs.existsSync(p)) return null;
+    return fs.readFileSync(p).buffer;
+  } catch (e) { return null; }
+});

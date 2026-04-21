@@ -9,14 +9,14 @@ const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3001";
 
 let mainWindow = null;
 let wsClient   = null;
-let authToken  = null;  // current manager session token
+let authToken  = null;
 
 // ═══════════════════════════════════════════════════════════
-// LOCAL DATABASE — shared between desktop and admin apps
+// LOCAL DATABASE
 // ═══════════════════════════════════════════════════════════
 
-const SHARED_DIR    = path.join(app.getPath("appData"), "SalesCallAnalyzer");
-const DB_PATH       = path.join(SHARED_DIR, "sales.json");
+const SHARED_DIR     = path.join(app.getPath("appData"), "SalesCallAnalyzer");
+const DB_PATH        = path.join(SHARED_DIR, "sales.json");
 const RECORDINGS_DIR = path.join(SHARED_DIR, "recordings");
 
 fs.mkdirSync(RECORDINGS_DIR, { recursive: true });
@@ -36,26 +36,29 @@ const DEFAULT_DB = {
     id: 1, name: "Менеджер", username: "manager",
     password_hash: hashPw("12345"),
     avatar: "МН", color: "#6366f1",
-    violations: 0, calls_count: 0, avg_score: null,
+    violations_count: 0, calls_count: 0, avg_score: null,
   }],
+  settings: { violations_threshold: 5 },
 };
 
 let db = JSON.parse(JSON.stringify(DEFAULT_DB));
 
-// In-memory session maps (reset on restart — by design)
-const sessions      = {};  // token → manager_id
-const adminSessions = {};  // token → true
+const sessions      = {};
+const adminSessions = {};
 
 function loadDB() {
   try {
     if (fs.existsSync(DB_PATH)) {
       const parsed = JSON.parse(fs.readFileSync(DB_PATH, "utf8"));
       db = { ...DEFAULT_DB, ...parsed };
-      // Migrate managers: ensure username + password_hash exist
+      // Migrations
       for (const m of db.managers || []) {
-        if (!m.username)      m.username      = `manager${m.id}`;
-        if (!m.password_hash) m.password_hash = hashPw("12345");
+        if (!m.username)         m.username         = `manager${m.id}`;
+        if (!m.password_hash)    m.password_hash    = hashPw("12345");
+        if (m.violations_count == null) m.violations_count = m.violations || 0;
       }
+      if (!db.settings) db.settings = { violations_threshold: 5 };
+      if (db.settings.violations_threshold == null) db.settings.violations_threshold = 5;
     }
   } catch (e) {
     console.log("[DB] load error, using defaults:", e.message);
@@ -82,6 +85,32 @@ function nowStr() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// NOTIFICATION HELPER
+// ═══════════════════════════════════════════════════════════
+
+async function checkViolationThreshold(managerId, hasErrors) {
+  if (!hasErrors || !managerId) return;
+  const mgr = db.managers.find(m => m.id === managerId);
+  if (!mgr) return;
+  const threshold = Number(db.settings?.violations_threshold) || 5;
+  const count = mgr.violations_count || 0;
+  // Notify when crossing a new multiple of threshold
+  if (count > 0 && count % threshold === 0) {
+    apiBackend("/api/notify", "POST", {
+      managerName: mgr.name,
+      violations:  count,
+      threshold,
+    }).catch(() => {});
+    try {
+      new Notification({
+        title: "⚠️ Порог нарушений достигнут",
+        body:  `${mgr.name}: ${count} нарушений (порог ${threshold})`,
+      }).show();
+    } catch (_) {}
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // LOCAL ROUTE HANDLER
 // ═══════════════════════════════════════════════════════════
 
@@ -90,12 +119,13 @@ function isLocalEndpoint(endpoint) {
     endpoint.startsWith("/api/auth") ||
     endpoint.startsWith("/api/calls") ||
     endpoint.startsWith("/api/contacts") ||
-    endpoint.startsWith("/api/managers")
+    endpoint.startsWith("/api/managers") ||
+    endpoint.startsWith("/api/settings")
   );
 }
 
 function handleLocal(endpoint, method, body, token) {
-  const seg = endpoint.split("/").filter(Boolean);  // ["api","calls","5"]
+  const seg = endpoint.split("/").filter(Boolean);
 
   // ── AUTH ────────────────────────────────────────────────
   if (endpoint === "/api/auth/login" && method === "POST") {
@@ -119,7 +149,7 @@ function handleLocal(endpoint, method, body, token) {
   if (endpoint === "/api/auth/admin" && method === "POST") {
     const { username, password } = body || {};
     const adm = db.admin || {};
-    if ((username || "").trim() !== adm.username)  return { error: "Неверный логин или пароль" };
+    if ((username || "").trim() !== adm.username)     return { error: "Неверный логин или пароль" };
     if (hashPw(password || "") !== adm.password_hash) return { error: "Неверный логин или пароль" };
     const t = genToken();
     adminSessions[t] = true;
@@ -143,14 +173,28 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true };
   }
 
-  // ── CALLS ───────────────────────────────────────────────
+  // ── SETTINGS ─────────────────────────────────────────────
+  if (endpoint === "/api/settings" && method === "GET") {
+    return { ...(db.settings || {}), violations_threshold: db.settings?.violations_threshold ?? 5 };
+  }
+
+  if (endpoint === "/api/settings" && method === "PUT") {
+    db.settings = { ...(db.settings || {}), ...body };
+    saveDB();
+    return { ok: true };
+  }
+
+  // ── CALLS ────────────────────────────────────────────────
   if (endpoint === "/api/calls" && method === "GET") {
     return [...db.calls].reverse();
   }
 
   if (endpoint === "/api/calls" && method === "POST") {
+    const hasErrors = (body.errors || []).length > 0;
+
     const call = {
       id:             nextId(db.calls),
+      managerId:      body.managerId      || null,
       phone:          body.phone          || "",
       direction:      body.direction      || "outbound",
       duration:       body.duration       || 0,
@@ -163,14 +207,32 @@ function handleLocal(endpoint, method, body, token) {
       saved:          !!body.saved,
       contact_id:     body.contact_id     || null,
       audioFile:      body.audioFile      || null,
+      adminComment:   "",
       created_at:     nowStr(),
     };
     db.calls.push(call);
+
+    // Update manager stats
+    if (body.managerId) {
+      const mgr = db.managers.find(m => m.id === body.managerId);
+      if (mgr) {
+        mgr.calls_count = (mgr.calls_count || 0) + 1;
+        if (body.score != null) {
+          mgr.avg_score = mgr.avg_score == null
+            ? body.score
+            : Math.round((mgr.avg_score * (mgr.calls_count - 1) + body.score) / mgr.calls_count);
+        }
+        if (hasErrors) {
+          mgr.violations_count = (mgr.violations_count || 0) + 1;
+        }
+      }
+    }
+
     saveDB();
-    return { ok: true, id: call.id };
+    return { ok: true, id: call.id, hasErrors, managerId: body.managerId };
   }
 
-  // PUT /api/calls/:id
+  // PUT /api/calls/:id — for updating audioFile
   if (seg.length === 3 && seg[1] === "calls" && method === "PUT") {
     const id   = parseInt(seg[2]);
     const call = db.calls.find(c => c.id === id);
@@ -180,15 +242,12 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true };
   }
 
-  // DELETE /api/calls/:id
-  if (seg.length === 3 && seg[1] === "calls" && method === "DELETE") {
+  // PUT /api/calls/:id/comment — admin adds a comment
+  if (seg.length === 4 && seg[1] === "calls" && seg[3] === "comment" && method === "PUT") {
     const id   = parseInt(seg[2]);
     const call = db.calls.find(c => c.id === id);
-    if (call?.audioFile) {
-      const fp = path.join(RECORDINGS_DIR, call.audioFile);
-      if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    }
-    db.calls = db.calls.filter(c => c.id !== id);
+    if (!call) return { error: "Not found" };
+    call.adminComment = body.comment ?? "";
     saveDB();
     return { ok: true };
   }
@@ -198,7 +257,6 @@ function handleLocal(endpoint, method, body, token) {
     return [...db.contacts].reverse();
   }
 
-  // GET /api/contacts/:id
   if (seg.length === 3 && seg[1] === "contacts" && method === "GET") {
     const id = parseInt(seg[2]);
     const c  = db.contacts.find(c => c.id === id);
@@ -211,13 +269,13 @@ function handleLocal(endpoint, method, body, token) {
     let existing  = db.contacts.find(c => c.phone === phone);
     let contact_id;
     if (existing) {
-      if (company       != null) existing.company       = company       || existing.company;
-      if (name          != null) existing.name          = name          || existing.name;
-      if (summary       != null) existing.summary       = summary       || existing.summary;
-      if (transcript    != null) existing.transcript    = transcript    || existing.transcript;
-      if (score         != null) existing.score         = score;
-      if (errors        != null) existing.errors        = errors;
-      if (recommendation!= null) existing.recommendation= recommendation;
+      if (company        != null) existing.company        = company        || existing.company;
+      if (name           != null) existing.name           = name           || existing.name;
+      if (summary        != null) existing.summary        = summary        || existing.summary;
+      if (transcript     != null) existing.transcript     = transcript     || existing.transcript;
+      if (score          != null) existing.score          = score;
+      if (errors         != null) existing.errors         = errors;
+      if (recommendation != null) existing.recommendation = recommendation;
       existing.calls_count = (existing.calls_count || 1) + 1;
       existing.updated_at  = nowStr();
       contact_id = existing.id;
@@ -241,7 +299,6 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true, id: contact_id };
   }
 
-  // PUT /api/contacts/:id
   if (seg.length === 3 && seg[1] === "contacts" && method === "PUT") {
     const id = parseInt(seg[2]);
     const c  = db.contacts.find(c => c.id === id);
@@ -251,7 +308,6 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true };
   }
 
-  // DELETE /api/contacts/:id
   if (seg.length === 3 && seg[1] === "contacts" && method === "DELETE") {
     db.contacts = db.contacts.filter(c => c.id !== parseInt(seg[2]));
     saveDB();
@@ -274,14 +330,13 @@ function handleLocal(endpoint, method, body, token) {
     const mgr = {
       id: nextId(db.managers), name: name.trim(), username: username.trim(),
       password_hash: hashPw(password), avatar: initials,
-      color: color || "#6366f1", violations: 0, calls_count: 0, avg_score: null,
+      color: color || "#6366f1", violations_count: 0, calls_count: 0, avg_score: null,
     };
     db.managers.push(mgr);
     saveDB();
     return { ok: true, id: mgr.id };
   }
 
-  // PUT /api/managers/:id
   if (seg.length === 3 && seg[1] === "managers" && method === "PUT") {
     if (!adminSessions[token]) return { error: "Требуется доступ администратора" };
     const id  = parseInt(seg[2]);
@@ -303,7 +358,6 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true };
   }
 
-  // DELETE /api/managers/:id
   if (seg.length === 3 && seg[1] === "managers" && method === "DELETE") {
     if (!adminSessions[token]) return { error: "Требуется доступ администратора" };
     db.managers = db.managers.filter(m => m.id !== parseInt(seg[2]));
@@ -311,29 +365,32 @@ function handleLocal(endpoint, method, body, token) {
     return { ok: true };
   }
 
-  // POST /api/managers/:id/stats
+  if (seg.length === 4 && seg[1] === "managers" && seg[3] === "calls" && method === "GET") {
+    const id = parseInt(seg[2]);
+    return db.calls.filter(c => c.managerId === id).slice().reverse();
+  }
+
   if (seg.length === 4 && seg[1] === "managers" && seg[3] === "stats" && method === "POST") {
     const id  = parseInt(seg[2]);
     const mgr = db.managers.find(m => m.id === id);
     if (!mgr) return { error: "Not found" };
     const { score = 0, violations = 0 } = body || {};
-    mgr.calls_count = (mgr.calls_count || 0) + 1;
-    mgr.avg_score   = mgr.avg_score == null
+    mgr.calls_count      = (mgr.calls_count || 0) + 1;
+    mgr.violations_count = (mgr.violations_count || 0) + violations;
+    mgr.avg_score = mgr.avg_score == null
       ? score
       : Math.round((mgr.avg_score * (mgr.calls_count - 1) + score) / mgr.calls_count);
-    mgr.violations  = (mgr.violations || 0) + violations;
     saveDB();
     return { ok: true };
   }
 
-  // DELETE /api/managers/:id/reset
   if (seg.length === 4 && seg[1] === "managers" && seg[3] === "reset" && method === "DELETE") {
     const mgr = db.managers.find(m => m.id === parseInt(seg[2]));
-    if (mgr) { mgr.violations = 0; mgr.calls_count = 0; mgr.avg_score = null; saveDB(); }
+    if (mgr) { mgr.violations_count = 0; mgr.calls_count = 0; mgr.avg_score = null; saveDB(); }
     return { ok: true };
   }
 
-  return null; // not handled locally — forward to backend
+  return null;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -382,7 +439,7 @@ function connectBackend() {
           new Notification({ title: "Звонок проанализирован", body: `Оценка: ${msg.analysis?.score || "—"}/100` }).show();
         }
         if (msg.type === "error") mainWindow?.webContents.send("stream-error", msg.error);
-        if (["call_saved", "contact_saved", "call_started"].includes(msg.type))
+        if (["call_saved", "contact_saved"].includes(msg.type))
           mainWindow?.webContents.send("data-updated", msg.type);
       } catch (_) {}
     });
@@ -413,18 +470,14 @@ ipcMain.handle("stop-recording", async () => {
 // AUDIO FILE IPC
 // ═══════════════════════════════════════════════════════════
 
-// Save audio buffer to local recordings dir; returns { ok, filename }
 ipcMain.handle("save-audio", (_, { callId, audioBuffer }) => {
   try {
     const filename = `${callId}.webm`;
     fs.writeFileSync(path.join(RECORDINGS_DIR, filename), Buffer.from(audioBuffer));
     return { ok: true, filename };
-  } catch (e) {
-    return { error: e.message };
-  }
+  } catch (e) { return { error: e.message }; }
 });
 
-// Read audio file; returns Buffer (sent as ArrayBuffer over IPC)
 ipcMain.handle("get-audio-data", (_, filename) => {
   try {
     const fp = path.join(RECORDINGS_DIR, filename);
@@ -433,16 +486,6 @@ ipcMain.handle("get-audio-data", (_, filename) => {
   } catch (_) { return null; }
 });
 
-// Delete audio file only (not the call record)
-ipcMain.handle("delete-audio-file", (_, filename) => {
-  try {
-    const fp = path.join(RECORDINGS_DIR, filename);
-    if (fs.existsSync(fp)) fs.unlinkSync(fp);
-    return { ok: true };
-  } catch (e) { return { error: e.message }; }
-});
-
-// Download backend temp audio (for Android source recordings)
 ipcMain.handle("download-audio", async (_, audioId) => {
   try {
     const r = await fetch(`${BACKEND_URL}/api/audio/${audioId}`);
@@ -451,7 +494,6 @@ ipcMain.handle("download-audio", async (_, audioId) => {
   } catch (_) { return null; }
 });
 
-// Send a local recording file to backend /api/transcribe; returns { transcript, duration }
 ipcMain.handle("transcribe-audio", async (_, filename) => {
   const fp = path.join(RECORDINGS_DIR, filename);
   if (!fs.existsSync(fp)) return { error: "Файл записи не найден" };
@@ -466,9 +508,7 @@ ipcMain.handle("transcribe-audio", async (_, filename) => {
       return { error: err.error || `HTTP ${r.status}` };
     }
     return await r.json();
-  } catch (e) {
-    return { error: e.message };
-  }
+  } catch (e) { return { error: e.message }; }
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -490,10 +530,19 @@ function apiCall(endpoint, method = "GET", body = null) {
   return apiBackend(endpoint, method, body);
 }
 
-ipcMain.handle("api-get",       (_, ep)      => apiCall(ep, "GET"));
-ipcMain.handle("api-post",      (_, ep, body) => apiCall(ep, "POST", body));
-ipcMain.handle("api-put",       (_, ep, body) => apiCall(ep, "PUT", body));
-ipcMain.handle("api-delete",    (_, ep)       => apiCall(ep, "DELETE"));
-ipcMain.handle("api-set-token", (_, token)    => { authToken = token; return { ok: true }; });
-ipcMain.handle("api-login",     (_, creds)    => handleLocal("/api/auth/login", "POST", creds, null));
-ipcMain.handle("ws-status-query", ()          => wsClient?.readyState === WS.OPEN ? "connected" : "disconnected");
+ipcMain.handle("api-get",    (_, ep)       => apiCall(ep, "GET"));
+ipcMain.handle("api-put",    (_, ep, body) => apiCall(ep, "PUT", body));
+ipcMain.handle("api-delete", (_, ep)       => apiCall(ep, "DELETE"));
+
+// POST: also fire violation threshold check after saving calls
+ipcMain.handle("api-post", async (_, ep, body) => {
+  const result = apiCall(ep, "POST", body);
+  if (ep === "/api/calls" && result?.ok) {
+    await checkViolationThreshold(result.managerId, result.hasErrors);
+  }
+  return result;
+});
+
+ipcMain.handle("api-set-token", (_, token) => { authToken = token; return { ok: true }; });
+ipcMain.handle("api-login",     (_, creds) => handleLocal("/api/auth/login", "POST", creds, null));
+ipcMain.handle("ws-status-query", ()       => wsClient?.readyState === WS.OPEN ? "connected" : "disconnected");

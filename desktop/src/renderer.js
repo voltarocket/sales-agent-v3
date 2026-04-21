@@ -38,7 +38,6 @@ const S = {
   skipNextAnalysis: false,
 
   activeAudioCallId: null,  // call whose audio player is open
-  retranscribingId:  null,  // call being retranscribed
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -172,6 +171,7 @@ async function discardCall() {
     summary:S.analysis?.summary, score:S.analysis?.score,
     errors:S.analysis?.errors||[], positives:S.analysis?.positives||[],
     recommendation:S.analysis?.recommendation, saved:false,
+    managerId: S.managerId,
   });
   if (callRes?.id) await saveAudioForCall(callRes.id);
   S.modal=null; S.analysis=null; S.transcript=""; load();
@@ -184,6 +184,7 @@ async function saveContact() {
     summary:S.analysis?.summary, score:S.analysis?.score,
     errors:S.analysis?.errors||[], positives:S.analysis?.positives||[],
     recommendation:S.analysis?.recommendation, saved:true,
+    managerId: S.managerId,
   });
   if (callRes?.id) await saveAudioForCall(callRes.id);
   await window.api.post("/api/contacts", {
@@ -370,14 +371,12 @@ function pageContacts() {
 </div>`;
 }
 
-// ── Calls page ────────────────────────────────────────────
+// ── Calls page (read-only for manager) ───────────────────
 function pageCalls() {
   if (!S.calls.length) return `<div class="empty"><div class="eicon">◷</div>Звонков пока нет</div>`;
   return `
 <div style="display:flex;flex-direction:column;gap:8px">
-  ${S.calls.map(c=>{
-    const isRetranscribing = S.retranscribingId === c.id;
-    return `
+  ${S.calls.map(c=>`
   <div class="call-item">
     <div class="call-meta">
       <span class="call-ph">${esc(c.phone||"—")}</span>
@@ -385,18 +384,13 @@ function pageCalls() {
       ${c.duration?`<span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${fmt(c.duration)}</span>`:""}
       ${c.score!=null?`<span class="score-chip" style="color:${sc(c.score)}">${c.score}/100</span>`:""}
       <span class="ctag ${c.saved?"ctag-saved":"ctag-anl"}">${c.saved?"→ контакт":"аналитика"}</span>
-      <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
-        ${c.audioFile ? `<button class="btn-ghost btn-sm" data-play="${c.id}" data-af="${esc(c.audioFile)}" title="Воспроизвести запись">▶ Запись</button>` : ""}
-        ${c.audioFile && !isRetranscribing ? `<button class="btn-ghost btn-sm" data-retranscribe="${c.id}" data-af="${esc(c.audioFile)}" title="Перетранскрибировать и переанализировать" style="font-size:10px">↺ Перетранскр.</button>` : ""}
-        ${isRetranscribing ? `<span style="font-size:11px;color:var(--text3)"><span class="spinner" style="width:12px;height:12px"></span> Обработка...</span>` : ""}
-        <button class="btn-del-call btn-sm" data-del="${c.id}" title="Удалить звонок" style="background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2);border-radius:6px;cursor:pointer;padding:4px 8px;font-size:11px">✕</button>
-      </div>
+      ${c.audioFile?`<button class="btn-ghost btn-sm" data-play="${c.id}" data-af="${esc(c.audioFile)}" style="margin-left:auto">▶ Запись</button>`:""}
     </div>
     ${c.summary?`<div class="call-sum">${esc(c.summary)}</div>`:""}
     ${c.transcript?`<div class="transcript-box" style="max-height:80px;margin-top:6px">${esc(c.transcript.slice(0,300))}${c.transcript.length>300?"...":""}</div>`:""}
-    ${S.activeAudioCallId===c.id?`<div style="margin-top:8px"><audio id="audio-${c.id}" controls style="width:100%;height:32px;margin-top:4px"></audio></div>`:""}
-  </div>`;
-  }).join("")}
+    ${S.activeAudioCallId===c.id?`<div style="margin-top:8px"><audio id="audio-${c.id}" controls style="width:100%;height:32px"></audio></div>`:""}
+    ${c.adminComment?`<div style="margin-top:8px;padding:8px 12px;background:rgba(99,102,241,.08);border:1px solid rgba(99,102,241,.2);border-radius:var(--r);font-size:12px;color:var(--text2)">💬 <strong>Комментарий администратора:</strong> ${esc(c.adminComment)}</div>`:""}
+  </div>`).join("")}
 </div>`;
 }
 
@@ -548,52 +542,6 @@ function bind() {
       const url  = URL.createObjectURL(blob);
       const el   = document.getElementById(`audio-${callId}`);
       if (el) { el.src = url; el.play().catch(()=>{}); }
-    });
-  });
-
-  // Re-transcribe + re-analyze
-  document.querySelectorAll("[data-retranscribe]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      const callId    = parseInt(btn.dataset.retranscribe);
-      const audioFile = btn.dataset.af;
-      if (!audioFile) { alert("Аудиозапись не привязана к этому звонку"); return; }
-      if (!confirm("Перетранскрибировать запись и обновить анализ?")) return;
-
-      S.retranscribingId = callId; render();
-      try {
-        const sttRes = await window.api.transcribeAudio(audioFile);
-        if (sttRes?.error) { alert("Ошибка транскрипции: " + sttRes.error); return; }
-
-        const mgr = S.managers.find(m=>m.id===S.managerId);
-        const llmRes = await window.api.post("/api/analyze", {
-          managerName: mgr?.name || "Менеджер",
-          transcript:  sttRes.transcript,
-        });
-        if (llmRes?.error) { alert("Ошибка анализа: " + llmRes.error); return; }
-
-        await window.api.put(`/api/calls/${callId}`, {
-          transcript:     sttRes.transcript,
-          summary:        llmRes.summary        || "",
-          score:          llmRes.score          ?? null,
-          errors:         llmRes.errors         || [],
-          positives:      llmRes.positives      || [],
-          recommendation: llmRes.recommendation || "",
-        });
-        await load();
-      } finally {
-        S.retranscribingId = null; render();
-      }
-    });
-  });
-
-  // Delete call (and its audio)
-  document.querySelectorAll("[data-del]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("Удалить звонок и запись?")) return;
-      const callId = parseInt(btn.dataset.del);
-      if (S.activeAudioCallId === callId) S.activeAudioCallId = null;
-      await window.api.delete(`/api/calls/${callId}`);
-      load();
     });
   });
 
