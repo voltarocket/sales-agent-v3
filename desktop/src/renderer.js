@@ -4,11 +4,11 @@
 const S = {
   // Auth
   token:       null,
-  currentUser: null,   // { id, name, username }
+  currentUser: null,
   loginError:  "",
   loginBusy:   false,
 
-  page:        "phone",   // phone | contacts | calls | analytics
+  page:        "phone",
   wsStatus:    "disconnected",
   recording:   false,
   seconds:     0,
@@ -20,7 +20,7 @@ const S = {
   analysis:    null,
   transcript:  "",
   duration:    0,
-  modal:       null,   // null | "wait" | "ask" | "form" | "saving" | "done"
+  modal:       null,
   company:     "",
   cname:       "",
   selectedContact: null,
@@ -28,9 +28,17 @@ const S = {
   manualRes:   null,
   manualBusy:  false,
   threshold:   5,
-  mediaRecorder: null,
+
+  mediaRecorder:    null,
+  audioChunks:      [],     // MediaRecorder blobs collected during recording
+  pendingAudioData: null,   // ArrayBuffer ready to save after call ends
+  pendingAudioId:   null,   // backend audioId for Android-source recordings
+
   timerInt:    null,
   skipNextAnalysis: false,
+
+  activeAudioCallId: null,  // call whose audio player is open
+  retranscribingId:  null,  // call being retranscribed
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -59,7 +67,7 @@ async function doLogin() {
   }
   S.token = res.token;
   S.currentUser = { id: res.id, name: res.name };
-  S.managerId = res.id;
+  S.managerId   = res.id;
   await window.api.setToken(res.token);
   S.wsStatus = await window.api.getWsStatus();
   load();
@@ -80,7 +88,7 @@ async function load() {
 }
 
 // ═══════════════════════════════════════════════════════════
-// AUDIO
+// AUDIO CAPTURE
 // ═══════════════════════════════════════════════════════════
 async function startAudio() {
   try {
@@ -88,11 +96,13 @@ async function startAudio() {
       audio:{ echoCancellation:false, noiseSuppression:false, sampleRate:16000, channelCount:1 },
       video: false,
     });
+    S.audioChunks = [];
     const mr = new MediaRecorder(stream, { mimeType:"audio/webm;codecs=opus" });
     mr.ondataavailable = async e => {
       if (e.data?.size > 0) {
+        S.audioChunks.push(e.data);               // save locally
         const buf = await e.data.arrayBuffer();
-        window.api.sendAudioChunk(buf);
+        window.api.sendAudioChunk(buf);            // stream to backend
       }
     };
     mr.start(1000);
@@ -115,9 +125,7 @@ function stopAudio() {
 async function startCall() {
   const ok = await window.api.startRecording({ phone: "", managerId: S.managerId });
   if (ok?.error) { alert(ok.error); return; }
-
   if (!await startAudio()) return;
-
   S.recording = true; S.seconds = 0;
   S.timerInt = setInterval(()=>{
     S.seconds++;
@@ -132,19 +140,40 @@ async function startCall() {
 async function stopCall() {
   stopAudio();
   clearInterval(S.timerInt);
-  S.duration = S.seconds;
-  S.recording = false;
+  S.duration   = S.seconds;
+  S.recording  = false;
   await window.api.stopRecording();
   S.modal = "wait"; render();
 }
 
+// Save audio collected by MediaRecorder (or download from backend for Android)
+async function saveAudioForCall(callId) {
+  if (S.pendingAudioData) {
+    const res = await window.api.saveAudioRecording(callId, S.pendingAudioData);
+    if (res?.filename) {
+      await window.api.put(`/api/calls/${callId}`, { audioFile: res.filename });
+    }
+    S.pendingAudioData = null;
+  } else if (S.pendingAudioId) {
+    const buf = await window.api.downloadAudio(S.pendingAudioId);
+    if (buf) {
+      const res = await window.api.saveAudioRecording(callId, buf);
+      if (res?.filename) {
+        await window.api.put(`/api/calls/${callId}`, { audioFile: res.filename });
+      }
+    }
+    S.pendingAudioId = null;
+  }
+}
+
 async function discardCall() {
-  await window.api.post("/api/calls", {
+  const callRes = await window.api.post("/api/calls", {
     phone:S.phone, duration:S.duration, transcript:S.transcript,
     summary:S.analysis?.summary, score:S.analysis?.score,
     errors:S.analysis?.errors||[], positives:S.analysis?.positives||[],
     recommendation:S.analysis?.recommendation, saved:false,
   });
+  if (callRes?.id) await saveAudioForCall(callRes.id);
   S.modal=null; S.analysis=null; S.transcript=""; load();
 }
 
@@ -156,11 +185,12 @@ async function saveContact() {
     errors:S.analysis?.errors||[], positives:S.analysis?.positives||[],
     recommendation:S.analysis?.recommendation, saved:true,
   });
+  if (callRes?.id) await saveAudioForCall(callRes.id);
   await window.api.post("/api/contacts", {
     phone:S.phone, company:S.company, name:S.cname,
     summary:S.analysis?.summary, transcript:S.transcript,
     score:S.analysis?.score, errors:S.analysis?.errors||[],
-    recommendation:S.analysis?.recommendation, call_id:callRes.id,
+    recommendation:S.analysis?.recommendation, call_id:callRes?.id,
   });
   S.modal="done"; render();
   setTimeout(()=>{ S.modal=null; S.analysis=null; S.transcript=""; S.company=""; S.cname=""; load(); }, 1400);
@@ -345,7 +375,9 @@ function pageCalls() {
   if (!S.calls.length) return `<div class="empty"><div class="eicon">◷</div>Звонков пока нет</div>`;
   return `
 <div style="display:flex;flex-direction:column;gap:8px">
-  ${S.calls.map(c=>`
+  ${S.calls.map(c=>{
+    const isRetranscribing = S.retranscribingId === c.id;
+    return `
   <div class="call-item">
     <div class="call-meta">
       <span class="call-ph">${esc(c.phone||"—")}</span>
@@ -353,52 +385,18 @@ function pageCalls() {
       ${c.duration?`<span style="font-size:11px;color:var(--text3);font-family:var(--mono)">${fmt(c.duration)}</span>`:""}
       ${c.score!=null?`<span class="score-chip" style="color:${sc(c.score)}">${c.score}/100</span>`:""}
       <span class="ctag ${c.saved?"ctag-saved":"ctag-anl"}">${c.saved?"→ контакт":"аналитика"}</span>
+      <div style="margin-left:auto;display:flex;gap:5px;align-items:center">
+        ${c.audioFile ? `<button class="btn-ghost btn-sm" data-play="${c.id}" data-af="${esc(c.audioFile)}" title="Воспроизвести запись">▶ Запись</button>` : ""}
+        ${c.audioFile && !isRetranscribing ? `<button class="btn-ghost btn-sm" data-retranscribe="${c.id}" data-af="${esc(c.audioFile)}" title="Перетранскрибировать и переанализировать" style="font-size:10px">↺ Перетранскр.</button>` : ""}
+        ${isRetranscribing ? `<span style="font-size:11px;color:var(--text3)"><span class="spinner" style="width:12px;height:12px"></span> Обработка...</span>` : ""}
+        <button class="btn-del-call btn-sm" data-del="${c.id}" title="Удалить звонок" style="background:rgba(239,68,68,.1);color:#f87171;border:1px solid rgba(239,68,68,.2);border-radius:6px;cursor:pointer;padding:4px 8px;font-size:11px">✕</button>
+      </div>
     </div>
     ${c.summary?`<div class="call-sum">${esc(c.summary)}</div>`:""}
-  </div>`).join("")}
-</div>`;
-}
-
-// ── Managers page ─────────────────────────────────────────
-function pageManagers() {
-  return `
-<div style="display:flex;flex-direction:column;gap:14px">
-  <div class="mgrid">
-    ${S.managers.map(m=>{
-      const v=m.violations||0, t=S.threshold, pct=Math.min(100,Math.round(v/t*100));
-      return `
-<div class="mcard">
-  <div class="mhd">
-    <div class="av" style="background:${m.color}">${esc(m.avatar)}</div>
-    <div><div class="mname">${esc(m.name)}</div><div style="font-size:12px;color:var(--text2)">Менеджер</div></div>
-  </div>
-  <div class="sgrid">
-    <div class="sbox"><div class="sval" style="color:#a5b4fc">${m.calls_count||0}</div><div class="slbl">ЗВОНКОВ</div></div>
-    <div class="sbox"><div class="sval" style="color:${vc(v,t)}">${v}</div><div class="slbl">НАРУШ.</div></div>
-    <div class="sbox"><div class="sval" style="color:#4ade80">${m.avg_score!=null?m.avg_score:"—"}</div><div class="slbl">ОЦЕНКА</div></div>
-  </div>
-  <div class="vbar-wrap">
-    <div class="vbar-hd"><span>Нарушения</span><span style="font-family:var(--mono)">${v}/${t}</span></div>
-    <div class="vbar-track"><div class="vbar-fill" style="width:${pct}%;background:${vc(v,t)}"></div></div>
-  </div>
-  ${v>=t?`<div class="alert-red" style="margin-top:10px;padding:8px 12px;font-size:12px">⚠ Превышен порог</div>`:""}
-  <div style="display:flex;gap:6px;margin-top:10px">
-    <button class="btn-ghost btn-sm" style="flex:1" data-reset-mgr="${m.id}">Сброс статистики</button>
-  </div>
-</div>`;
-    }).join("")}
-  </div>
-  <div class="card">
-    <div class="ctitle">Добавить менеджера</div>
-    <div style="display:flex;gap:8px">
-      <input id="new-mgr" type="text" placeholder="Имя Фамилия" style="flex:1"/>
-      <button class="btn-ghost" id="btn-add-mgr">Добавить</button>
-    </div>
-    <div style="margin-top:12px">
-      <label>Порог нарушений для алерта</label>
-      <input id="threshold-inp" type="number" min="1" max="20" value="${S.threshold}" style="width:80px"/>
-    </div>
-  </div>
+    ${c.transcript?`<div class="transcript-box" style="max-height:80px;margin-top:6px">${esc(c.transcript.slice(0,300))}${c.transcript.length>300?"...":""}</div>`:""}
+    ${S.activeAudioCallId===c.id?`<div style="margin-top:8px"><audio id="audio-${c.id}" controls style="width:100%;height:32px;margin-top:4px"></audio></div>`:""}
+  </div>`;
+  }).join("")}
 </div>`;
 }
 
@@ -523,22 +521,6 @@ function bind() {
     })
   );
 
-  // Managers
-  document.getElementById("btn-add-mgr")?.addEventListener("click", async () => {
-    const name = document.getElementById("new-mgr")?.value.trim();
-    if (!name) return;
-    await window.api.post("/api/managers", { name });
-    document.getElementById("new-mgr").value = "";
-    load();
-  });
-  document.querySelectorAll("[data-reset-mgr]").forEach(el =>
-    el.addEventListener("click", async () => {
-      await window.api.delete(`/api/managers/${el.dataset.resetMgr}/reset`);
-      load();
-    })
-  );
-  document.getElementById("threshold-inp")?.addEventListener("change", e => { S.threshold=+e.target.value; });
-
   // Analytics
   document.getElementById("man-txt")?.addEventListener("input", e => S.manualTxt=e.target.value);
   document.getElementById("btn-analyze")?.addEventListener("click", async () => {
@@ -546,6 +528,73 @@ function bind() {
     S.manualBusy=true; S.manualRes=null; render();
     S.manualRes = await window.api.post("/api/analyze", { managerName:"Менеджер", transcript:S.manualTxt });
     S.manualBusy=false; render();
+  });
+
+  // ── Call history actions ─────────────────────────────────
+
+  // Play audio
+  document.querySelectorAll("[data-play]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const callId    = parseInt(btn.dataset.play);
+      const audioFile = btn.dataset.af;
+      if (S.activeAudioCallId === callId) {
+        S.activeAudioCallId = null; render(); return;
+      }
+      S.activeAudioCallId = callId; render();
+      // Load audio and set src
+      const buf = await window.api.getAudioData(audioFile);
+      if (!buf) { alert("Файл записи не найден"); S.activeAudioCallId=null; render(); return; }
+      const blob = new Blob([buf], { type: "audio/webm" });
+      const url  = URL.createObjectURL(blob);
+      const el   = document.getElementById(`audio-${callId}`);
+      if (el) { el.src = url; el.play().catch(()=>{}); }
+    });
+  });
+
+  // Re-transcribe + re-analyze
+  document.querySelectorAll("[data-retranscribe]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const callId    = parseInt(btn.dataset.retranscribe);
+      const audioFile = btn.dataset.af;
+      if (!audioFile) { alert("Аудиозапись не привязана к этому звонку"); return; }
+      if (!confirm("Перетранскрибировать запись и обновить анализ?")) return;
+
+      S.retranscribingId = callId; render();
+      try {
+        const sttRes = await window.api.transcribeAudio(audioFile);
+        if (sttRes?.error) { alert("Ошибка транскрипции: " + sttRes.error); return; }
+
+        const mgr = S.managers.find(m=>m.id===S.managerId);
+        const llmRes = await window.api.post("/api/analyze", {
+          managerName: mgr?.name || "Менеджер",
+          transcript:  sttRes.transcript,
+        });
+        if (llmRes?.error) { alert("Ошибка анализа: " + llmRes.error); return; }
+
+        await window.api.put(`/api/calls/${callId}`, {
+          transcript:     sttRes.transcript,
+          summary:        llmRes.summary        || "",
+          score:          llmRes.score          ?? null,
+          errors:         llmRes.errors         || [],
+          positives:      llmRes.positives      || [],
+          recommendation: llmRes.recommendation || "",
+        });
+        await load();
+      } finally {
+        S.retranscribingId = null; render();
+      }
+    });
+  });
+
+  // Delete call (and its audio)
+  document.querySelectorAll("[data-del]").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      if (!confirm("Удалить звонок и запись?")) return;
+      const callId = parseInt(btn.dataset.del);
+      if (S.activeAudioCallId === callId) S.activeAudioCallId = null;
+      await window.api.delete(`/api/calls/${callId}`);
+      load();
+    });
   });
 
   // Modal
@@ -570,11 +619,25 @@ function bind() {
 // ═══════════════════════════════════════════════════════════
 window.api.on("ws-status", status => { S.wsStatus=status; render(); });
 window.api.on("processing", () => { S.modal="wait"; render(); });
-window.api.on("call-analyzed", msg => {
+window.api.on("call-analyzed", async msg => {
   if (S.skipNextAnalysis) { S.skipNextAnalysis = false; return; }
+
+  // Collect MediaRecorder audio from this recording session
+  if (S.audioChunks.length > 0) {
+    const blob = new Blob(S.audioChunks, { type: "audio/webm" });
+    S.pendingAudioData = await blob.arrayBuffer();
+    S.pendingAudioId   = null;
+  } else if (msg.audioId) {
+    // Android / external source — backend kept the WAV temporarily
+    S.pendingAudioId   = msg.audioId;
+    S.pendingAudioData = null;
+  }
+  S.audioChunks = [];
+
   S.analysis   = msg.analysis;
-  S.transcript = msg.transcript||"";
-  S.duration   = msg.duration||S.seconds;
+  S.transcript = msg.transcript || "";
+  S.duration   = msg.duration   || S.seconds;
+  S.phone      = msg.phone      || S.phone;
   S.modal      = "ask";
   render();
 });
@@ -680,7 +743,7 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .transcript-box{font-size:12px;font-family:var(--mono);color:var(--text2);line-height:1.7;max-height:180px;overflow-y:auto;background:var(--surface2);padding:10px 14px;border-radius:var(--r)}
 
 /* Calls */
-.call-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px;margin-bottom:0}
+.call-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--r);padding:12px 16px}
 .call-row{padding:8px 0;border-bottom:.5px solid var(--border)}
 .call-row:last-child{border-bottom:none}
 .call-meta{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:3px}
@@ -691,20 +754,7 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .ctag-saved{background:rgba(255,255,255,.15);color:var(--accent2)}
 .ctag-anl{background:var(--surface2);color:var(--text3)}
 .empty-sm{font-size:12px;color:var(--text3);padding:12px 0}
-
-/* Managers */
-.mgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:14px}
-.mcard{background:var(--surface);border:1px solid var(--border);border-radius:var(--rl);padding:18px}
-.mhd{display:flex;align-items:center;gap:12px;margin-bottom:14px}
-.mname{font-size:15px;font-weight:700}
-.sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
-.sbox{background:var(--surface2);border-radius:var(--r);padding:8px;text-align:center}
-.sval{font-size:18px;font-weight:700;font-family:var(--mono)}
-.slbl{font-size:10px;color:var(--text3);margin-top:1px;letter-spacing:.5px}
-.vbar-wrap{margin-top:12px}
-.vbar-hd{display:flex;justify-content:space-between;font-size:11px;color:var(--text2);margin-bottom:5px}
-.vbar-track{height:5px;background:var(--surface2);border-radius:3px;overflow:hidden}
-.vbar-fill{height:100%;border-radius:3px;transition:width .5s}
+audio{border-radius:6px;background:var(--surface2)}
 
 /* Analytics */
 .score-row{display:flex;align-items:center;padding:14px;background:var(--surface2);border:1px solid var(--border);border-radius:var(--rl)}
@@ -729,8 +779,6 @@ textarea{resize:vertical;font-family:var(--mono);font-size:12px;line-height:1.6}
 .modal-sub{font-size:12px;color:var(--text2);margin-bottom:16px}
 .mrow{display:flex;gap:10px}
 .mrow .btn-red,.mrow .btn-primary{flex:1;margin-top:0}
-
-/* Modal header / close */
 .modal-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:4px}
 .modal-close{background:none;border:none;color:var(--text3);font-size:16px;cursor:pointer;padding:2px 8px;border-radius:6px;line-height:1;transition:all .15s}
 .modal-close:hover{color:var(--text);background:rgba(255,255,255,.08)}

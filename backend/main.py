@@ -1,15 +1,11 @@
 import asyncio
-import hashlib
 import json
 import os
 import random
 import re
-import secrets
 import string
 import subprocess
-import threading
 import time
-from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
@@ -17,126 +13,20 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 load_dotenv()
-
-# ═══════════════════════════════════════════════════════════
-# AUTH UTILITIES
-# ═══════════════════════════════════════════════════════════
-
-def hash_password(password: str) -> str:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest()
-
-def verify_password(password: str, hashed: str) -> bool:
-    return hashlib.sha256(password.encode("utf-8")).hexdigest() == hashed
-
-def generate_token() -> str:
-    return secrets.token_hex(32)
-
-active_sessions: dict = {}        # token → manager_id
-active_admin_sessions: dict = {}  # token → True
-
-
-def _get_token(req) -> str:
-    auth = req.headers.get("Authorization", "")
-    return auth.removeprefix("Bearer ").strip()
-
-def _is_admin(req) -> bool:
-    return _get_token(req) in active_admin_sessions
-
-def _get_manager(req) -> Optional[dict]:
-    mid = active_sessions.get(_get_token(req))
-    if mid is None:
-        return None
-    return next((m for m in db_data["managers"] if m["id"] == mid), None)
-
-def _safe_manager(m: dict) -> dict:
-    return {k: v for k, v in m.items() if k != "password_hash"}
-
-
-# ═══════════════════════════════════════════════════════════
-# DATABASE — JSON file with threading lock
-# ═══════════════════════════════════════════════════════════
-
-DB_PATH = Path("sales.json")
-_db_lock = threading.Lock()
-
-_DEFAULT_DB = {
-    "contacts": [],
-    "calls": [],
-    "admin": {
-        "username": "admin",
-        "password_hash": hash_password("admin"),
-    },
-    "managers": [
-        {
-            "id": 1,
-            "name": "Менеджер",
-            "username": "manager",
-            "password_hash": hash_password("12345"),
-            "avatar": "МН",
-            "color": "#6366f1",
-            "violations": 0,
-            "calls_count": 0,
-            "avg_score": None,
-        }
-    ],
-}
-
-
-def _load_db() -> dict:
-    if not DB_PATH.exists():
-        DB_PATH.write_text(json.dumps(_DEFAULT_DB, ensure_ascii=False, indent=2), encoding="utf-8")
-    try:
-        return json.loads(DB_PATH.read_text(encoding="utf-8"))
-    except Exception:
-        return {k: list(v) if isinstance(v, list) else v for k, v in _DEFAULT_DB.items()}
-
-
-def _save_db(data: dict) -> None:
-    DB_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-db_data: dict = _load_db()
-for _k, _v in _DEFAULT_DB.items():
-    if _k not in db_data:
-        db_data[_k] = _v
-# migrate: add admin credentials if missing
-if "admin" not in db_data:
-    db_data["admin"] = {"username": "admin", "password_hash": hash_password("admin")}
-# migrate existing managers: add username/password if missing
-for _mgr in db_data.get("managers", []):
-    if "username" not in _mgr:
-        _mgr["username"] = f"manager{_mgr['id']}"
-    if "password_hash" not in _mgr:
-        _mgr["password_hash"] = hash_password("12345")
-_save_db(db_data)
-print("[DB] ready → sales.json")
-
-
-def db_write() -> None:
-    with _db_lock:
-        _save_db(db_data)
-
-
-def next_id(arr: list) -> int:
-    return max((r["id"] for r in arr), default=0) + 1
-
-
-def now_str() -> str:
-    return datetime.now().strftime("%d.%m.%Y %H:%M:%S")
-
 
 # ═══════════════════════════════════════════════════════════
 # PROVIDERS
 # ═══════════════════════════════════════════════════════════
 
-GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+GROQ_API_KEY   = os.getenv("GROQ_API_KEY", "")
 YANDEX_API_KEY = os.getenv("YANDEX_API_KEY", "")
 YANDEX_FOLDER_ID = os.getenv("YANDEX_FOLDER_ID", "")
 
 TRANSCRIBE: Optional[str] = "groq" if GROQ_API_KEY else ("yandex" if YANDEX_API_KEY else None)
-ANALYZE: Optional[str] = "yandex" if YANDEX_API_KEY else ("groq" if GROQ_API_KEY else None)
+ANALYZE:    Optional[str] = "yandex" if YANDEX_API_KEY else ("groq" if GROQ_API_KEY else None)
 
 # ═══════════════════════════════════════════════════════════
 # FFMPEG
@@ -151,7 +41,6 @@ def _find_ffmpeg() -> Optional[str]:
         "/usr/bin/ffmpeg",
     ]
     candidates = [c for c in candidates if c]
-
     try:
         r = subprocess.run(
             "where ffmpeg 2>nul || which ffmpeg 2>/dev/null",
@@ -161,7 +50,6 @@ def _find_ffmpeg() -> Optional[str]:
             candidates.insert(0, r.stdout.strip().split("\n")[0].strip())
     except Exception:
         pass
-
     for cmd in candidates:
         try:
             r = subprocess.run([cmd, "-version"], capture_output=True, timeout=3)
@@ -224,6 +112,17 @@ app.add_middleware(
 )
 
 Path("uploads").mkdir(exist_ok=True)
+
+# Temporary audio files keyed by audioId — downloaded by desktop then deleted
+temp_audio_files: dict = {}
+
+
+async def _cleanup_audio(audio_id: str, delay: int) -> None:
+    await asyncio.sleep(delay)
+    path = temp_audio_files.pop(audio_id, None)
+    if path and os.path.exists(path):
+        os.unlink(path)
+
 
 # ═══════════════════════════════════════════════════════════
 # WEBSOCKET — connection manager
@@ -376,95 +275,28 @@ def health():
 
 
 # ═══════════════════════════════════════════════════════════
-# ROUTES — AUTH
-# ═══════════════════════════════════════════════════════════
-
-@app.post("/api/auth/login")
-async def auth_login(req: Request):
-    body = await req.json()
-    username = body.get("username", "").strip()
-    password = body.get("password", "")
-    mgr = next((m for m in db_data["managers"] if m.get("username") == username), None)
-    if not mgr or not verify_password(password, mgr.get("password_hash", "")):
-        raise HTTPException(401, {"error": "Неверный логин или пароль"})
-    token = generate_token()
-    active_sessions[token] = mgr["id"]
-    return {"ok": True, "token": token, "id": mgr["id"], "name": mgr["name"]}
-
-
-@app.get("/api/auth/me")
-async def auth_me(req: Request):
-    mgr = _get_manager(req)
-    if not mgr:
-        raise HTTPException(401, {"error": "Unauthorized"})
-    return _safe_manager(mgr)
-
-
-@app.post("/api/auth/admin")
-async def auth_admin(req: Request):
-    body = await req.json()
-    username = body.get("username", "").strip()
-    password = body.get("password", "")
-    adm = db_data.get("admin", {})
-    if username != adm.get("username", "admin"):
-        raise HTTPException(401, {"error": "Неверный логин или пароль"})
-    if not verify_password(password, adm.get("password_hash", hash_password("admin"))):
-        raise HTTPException(401, {"error": "Неверный логин или пароль"})
-    token = generate_token()
-    active_admin_sessions[token] = True
-    return {"ok": True, "token": token}
-
-
-@app.put("/api/auth/admin")
-async def update_admin_credentials(req: Request):
-    if not _is_admin(req):
-        raise HTTPException(401, {"error": "Требуется доступ администратора"})
-    body = await req.json()
-    new_username = body.get("username", "").strip()
-    new_password = body.get("password", "")
-    if not new_username:
-        raise HTTPException(400, {"error": "Логин не может быть пустым"})
-    if new_password and len(new_password) < 4:
-        raise HTTPException(400, {"error": "Пароль минимум 4 символа"})
-    adm = db_data.setdefault("admin", {})
-    adm["username"] = new_username
-    if new_password:
-        adm["password_hash"] = hash_password(new_password)
-    db_write()
-    return {"ok": True}
-
-
-@app.post("/api/auth/logout")
-async def auth_logout(req: Request):
-    token = _get_token(req)
-    active_sessions.pop(token, None)
-    active_admin_sessions.pop(token, None)
-    return {"ok": True}
-
-
-# ═══════════════════════════════════════════════════════════
 # ROUTES — SIP CONFIG
 # ═══════════════════════════════════════════════════════════
 
 @app.get("/api/sip/config")
 def sip_config(ext: Optional[str] = None):
-    host = os.getenv("FREEPBX_HOST", "localhost")
+    host    = os.getenv("FREEPBX_HOST", "localhost")
     ws_port = os.getenv("FREEPBX_WS_PORT", "8088")
-    domain = os.getenv("FREEPBX_DOMAIN") or host
-    ws_uri = f"ws://{host}:{ws_port}/ws"
+    domain  = os.getenv("FREEPBX_DOMAIN") or host
+    ws_uri  = f"ws://{host}:{ws_port}/ws"
 
     extensions = []
     if os.getenv("FREEPBX_EXTENSION") and os.getenv("FREEPBX_PASSWORD"):
         extensions.append({
             "extension": os.getenv("FREEPBX_EXTENSION"),
-            "password": os.getenv("FREEPBX_PASSWORD"),
-            "label": "Менеджер",
+            "password":  os.getenv("FREEPBX_PASSWORD"),
+            "label":     "Менеджер",
         })
     if os.getenv("FREEPBX_EXT_2") and os.getenv("FREEPBX_PASS_2"):
         extensions.append({
             "extension": os.getenv("FREEPBX_EXT_2"),
-            "password": os.getenv("FREEPBX_PASS_2"),
-            "label": "Клиент",
+            "password":  os.getenv("FREEPBX_PASS_2"),
+            "label":     "Клиент",
         })
 
     if not extensions:
@@ -517,7 +349,7 @@ async def transcribe(audio: UploadFile = File(...)):
 async def analyze(req: Request):
     body = await req.json()
     manager_name = body.get("managerName", "Менеджер")
-    transcript = body.get("transcript", "")
+    transcript   = body.get("transcript", "")
     if not transcript:
         raise HTTPException(400, {"error": "transcript required"})
     if not ANALYZE:
@@ -531,248 +363,17 @@ async def analyze(req: Request):
 
 
 # ═══════════════════════════════════════════════════════════
-# ROUTES — CALLS
+# ROUTES — TEMP AUDIO (for Android clients)
 # ═══════════════════════════════════════════════════════════
 
-@app.get("/api/calls")
-def get_calls():
-    return list(reversed(db_data["calls"]))
-
-
-@app.post("/api/calls")
-async def create_call(req: Request):
-    body = await req.json()
-    call = {
-        "id": next_id(db_data["calls"]),
-        "phone": body.get("phone", ""),
-        "direction": body.get("direction", "outbound"),
-        "duration": body.get("duration", 0),
-        "transcript": body.get("transcript", ""),
-        "summary": body.get("summary", ""),
-        "score": body.get("score"),
-        "errors": body.get("errors", []),
-        "positives": body.get("positives", []),
-        "recommendation": body.get("recommendation", ""),
-        "saved": bool(body.get("saved", False)),
-        "contact_id": body.get("contact_id"),
-        "created_at": now_str(),
-    }
-    db_data["calls"].append(call)
-    db_write()
-    asyncio.create_task(_broadcast({"type": "call_saved", "id": call["id"], "phone": call["phone"]}))
-    return {"ok": True, "id": call["id"]}
-
-
-@app.delete("/api/calls/{call_id}")
-async def delete_call(call_id: int):
-    db_data["calls"] = [c for c in db_data["calls"] if c["id"] != call_id]
-    db_write()
-    return {"ok": True}
-
-
-# ═══════════════════════════════════════════════════════════
-# ROUTES — CONTACTS
-# ═══════════════════════════════════════════════════════════
-
-@app.get("/api/contacts")
-def get_contacts():
-    return list(reversed(db_data["contacts"]))
-
-
-@app.get("/api/contacts/{contact_id}")
-def get_contact(contact_id: int):
-    c = next((c for c in db_data["contacts"] if c["id"] == contact_id), None)
-    if not c:
-        raise HTTPException(404, {"error": "Not found"})
-    calls = list(reversed([call for call in db_data["calls"] if call.get("contact_id") == c["id"]]))
-    return {**c, "calls": calls}
-
-
-@app.post("/api/contacts")
-async def create_or_update_contact(req: Request):
-    body = await req.json()
-    phone = body.get("phone")
-    company = body.get("company")
-    name = body.get("name")
-    summary = body.get("summary")
-    transcript = body.get("transcript")
-    score = body.get("score")
-    errors = body.get("errors")
-    recommendation = body.get("recommendation")
-    call_id = body.get("call_id")
-
-    existing = next((c for c in db_data["contacts"] if c["phone"] == phone), None)
-    if existing:
-        if company is not None:
-            existing["company"] = company or existing["company"]
-        if name is not None:
-            existing["name"] = name or existing["name"]
-        if summary is not None:
-            existing["summary"] = summary or existing["summary"]
-        if transcript is not None:
-            existing["transcript"] = transcript or existing["transcript"]
-        if score is not None:
-            existing["score"] = score or existing["score"]
-        if errors is not None:
-            existing["errors"] = errors or existing["errors"]
-        if recommendation is not None:
-            existing["recommendation"] = recommendation or existing["recommendation"]
-        existing["calls_count"] = (existing.get("calls_count") or 1) + 1
-        existing["updated_at"] = now_str()
-        contact_id = existing["id"]
-    else:
-        contact = {
-            "id": next_id(db_data["contacts"]),
-            "phone": phone,
-            "company": company or "",
-            "name": name or "",
-            "summary": summary or "",
-            "transcript": transcript or "",
-            "score": score,
-            "errors": errors or [],
-            "recommendation": recommendation or "",
-            "calls_count": 1,
-            "created_at": now_str(),
-            "updated_at": now_str(),
-        }
-        db_data["contacts"].append(contact)
-        contact_id = contact["id"]
-
-    if call_id:
-        call = next((c for c in db_data["calls"] if c["id"] == call_id), None)
-        if call:
-            call["saved"] = True
-            call["contact_id"] = contact_id
-
-    db_write()
-    asyncio.create_task(_broadcast({"type": "contact_saved", "id": contact_id, "phone": phone, "company": company}))
-    return {"ok": True, "id": contact_id}
-
-
-@app.put("/api/contacts/{contact_id}")
-async def update_contact(contact_id: int, req: Request):
-    c = next((c for c in db_data["contacts"] if c["id"] == contact_id), None)
-    if not c:
-        raise HTTPException(404, {"error": "Not found"})
-    body = await req.json()
-    c.update({**body, "updated_at": now_str()})
-    db_write()
-    return {"ok": True}
-
-
-@app.delete("/api/contacts/{contact_id}")
-async def delete_contact(contact_id: int):
-    db_data["contacts"] = [c for c in db_data["contacts"] if c["id"] != contact_id]
-    db_write()
-    return {"ok": True}
-
-
-# ═══════════════════════════════════════════════════════════
-# ROUTES — MANAGERS
-# ═══════════════════════════════════════════════════════════
-
-@app.get("/api/managers")
-def get_managers():
-    return [_safe_manager(m) for m in db_data["managers"]]
-
-
-@app.post("/api/managers")
-async def create_manager(req: Request):
-    if not _is_admin(req):
-        raise HTTPException(401, {"error": "Требуется доступ администратора"})
-    body = await req.json()
-    name = body.get("name", "").strip()
-    username = body.get("username", "").strip()
-    password = body.get("password", "")
-    color = body.get("color", "#6366f1")
-    if not name:
-        raise HTTPException(400, {"error": "Имя обязательно"})
-    if not username:
-        raise HTTPException(400, {"error": "Логин обязателен"})
-    if not password:
-        raise HTTPException(400, {"error": "Пароль обязателен"})
-    if next((m for m in db_data["managers"] if m.get("username") == username), None):
-        raise HTTPException(400, {"error": "Логин уже занят"})
-    initials = "".join(w[0] for w in name.split() if w).upper()[:2]
-    mgr = {
-        "id": next_id(db_data["managers"]),
-        "name": name,
-        "username": username,
-        "password_hash": hash_password(password),
-        "avatar": initials,
-        "color": color,
-        "violations": 0,
-        "calls_count": 0,
-        "avg_score": None,
-    }
-    db_data["managers"].append(mgr)
-    db_write()
-    return {"ok": True, "id": mgr["id"]}
-
-
-@app.put("/api/managers/{manager_id}")
-async def update_manager(manager_id: int, req: Request):
-    if not _is_admin(req):
-        raise HTTPException(401, {"error": "Требуется доступ администратора"})
-    mgr = next((m for m in db_data["managers"] if m["id"] == manager_id), None)
-    if not mgr:
-        raise HTTPException(404, {"error": "Not found"})
-    body = await req.json()
-    if "name" in body and body["name"].strip():
-        mgr["name"] = body["name"].strip()
-        mgr["avatar"] = "".join(w[0] for w in mgr["name"].split() if w).upper()[:2]
-    if "username" in body:
-        new_uname = body["username"].strip()
-        if new_uname != mgr["username"]:
-            if next((m for m in db_data["managers"] if m.get("username") == new_uname and m["id"] != manager_id), None):
-                raise HTTPException(400, {"error": "Логин уже занят"})
-            mgr["username"] = new_uname
-    if "password" in body and body["password"]:
-        mgr["password_hash"] = hash_password(body["password"])
-    if "color" in body:
-        mgr["color"] = body["color"]
-    db_write()
-    return {"ok": True}
-
-
-@app.delete("/api/managers/{manager_id}")
-async def delete_manager(manager_id: int, req: Request):
-    if not _is_admin(req):
-        raise HTTPException(401, {"error": "Требуется доступ администратора"})
-    db_data["managers"] = [m for m in db_data["managers"] if m["id"] != manager_id]
-    db_write()
-    return {"ok": True}
-
-
-@app.post("/api/managers/{manager_id}/stats")
-async def manager_stats(manager_id: int, req: Request):
-    mgr = next((m for m in db_data["managers"] if m["id"] == manager_id), None)
-    if not mgr:
-        raise HTTPException(404, {"error": "Not found"})
-    body = await req.json()
-    score = body.get("score", 0)
-    violations = body.get("violations", 0)
-    mgr["calls_count"] += 1
-    if mgr["avg_score"] is None:
-        mgr["avg_score"] = score
-    else:
-        mgr["avg_score"] = round(
-            (mgr["avg_score"] * (mgr["calls_count"] - 1) + score) / mgr["calls_count"]
-        )
-    mgr["violations"] += violations
-    db_write()
-    return {"ok": True}
-
-
-@app.delete("/api/managers/{manager_id}/reset")
-async def reset_manager(manager_id: int):
-    mgr = next((m for m in db_data["managers"] if m["id"] == manager_id), None)
-    if mgr:
-        mgr["violations"] = 0
-        mgr["calls_count"] = 0
-        mgr["avg_score"] = None
-        db_write()
-    return {"ok": True}
+@app.get("/api/audio/{audio_id}")
+async def get_audio(audio_id: str):
+    wav_path = temp_audio_files.get(audio_id)
+    if not wav_path or not os.path.exists(wav_path):
+        raise HTTPException(404, {"error": "Audio not found or expired"})
+    # Schedule deletion after serving
+    asyncio.create_task(_cleanup_audio(audio_id, 5))
+    return FileResponse(wav_path, media_type="audio/wav", filename="recording.wav")
 
 
 # ═══════════════════════════════════════════════════════════
@@ -781,11 +382,11 @@ async def reset_manager(manager_id: int):
 
 @app.post("/api/notify")
 async def notify(req: Request):
-    body = await req.json()
-    to = body.get("to")
+    from datetime import datetime
+    body         = await req.json()
     manager_name = body.get("managerName", "")
-    violations = body.get("violations", 0)
-    threshold = body.get("threshold", 0)
+    violations   = body.get("violations", 0)
+    threshold    = body.get("threshold", 0)
 
     if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
         try:
@@ -793,7 +394,7 @@ async def notify(req: Request):
                 r = await client.post(
                     f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
                     json={
-                        "chat_id": os.getenv("TELEGRAM_CHAT_ID"),
+                        "chat_id":    os.getenv("TELEGRAM_CHAT_ID"),
                         "text": (
                             f"⚠️ *Sales Alert*\n"
                             f"Менеджер *{manager_name}*: *{violations}/{threshold}* нарушений\n"
@@ -808,7 +409,7 @@ async def notify(req: Request):
         except Exception as e:
             print(f"[NOTIFY] {e}")
 
-    print(f"[NOTIFY] {manager_name}: {violations}/{threshold} → {to}")
+    print(f"[NOTIFY] {manager_name}: {violations}/{threshold}")
     return {"ok": True, "mode": "console"}
 
 
@@ -821,8 +422,11 @@ async def _process_session(session: dict, duration: int) -> dict:
     print(f"[WS] audio buffer: {len(audio_buffer)} bytes, duration: {duration}s")
 
     transcript = ""
+    audio_id   = None
+
     if len(audio_buffer) > 1000 and TRANSCRIBE:
-        tmp_pcm = Path("uploads") / f"ws_{int(time.time() * 1000)}.pcm"
+        ts       = int(time.time() * 1000)
+        tmp_pcm  = Path("uploads") / f"ws_{ts}.pcm"
         wav_path = str(tmp_pcm) + ".wav"
         tmp_pcm.write_bytes(audio_buffer)
         try:
@@ -832,46 +436,33 @@ async def _process_session(session: dict, duration: int) -> dict:
                     capture_output=True, timeout=30,
                 )
                 if r.returncode == 0:
-                    result = await transcribe_groq(wav_path, "audio.wav", "audio/wav")
+                    result     = await transcribe_groq(wav_path, "audio.wav", "audio/wav")
                     transcript = result["text"]
-                if os.path.exists(wav_path):
-                    os.unlink(wav_path)
+                    # Keep WAV for desktop to download (Android source)
+                    audio_id = f"{ts}_{session.get('managerId', 0)}"
+                    temp_audio_files[audio_id] = wav_path
+                    asyncio.create_task(_cleanup_audio(audio_id, 300))
+                    wav_path = None  # don't delete below
         finally:
             if tmp_pcm.exists():
                 tmp_pcm.unlink()
+            if wav_path and os.path.exists(wav_path):
+                os.unlink(wav_path)
 
     analysis: dict = {"summary": "", "score": 0, "errors": [], "positives": [], "recommendation": ""}
     if transcript and ANALYZE:
         try:
-            raw = await analyze_groq("Менеджер", transcript)
+            raw      = await analyze_groq("Менеджер", transcript)
             analysis = _clean_json(raw)
         except Exception as e:
             print(f"[WS] analyze error: {e}")
 
-    call = {
-        "id": next_id(db_data["calls"]),
-        "phone": session["phone"],
-        "direction": "outbound",
-        "duration": duration,
-        "transcript": transcript,
-        "summary": analysis.get("summary", ""),
-        "score": analysis.get("score", 0),
-        "errors": analysis.get("errors", []),
-        "positives": analysis.get("positives", []),
-        "recommendation": analysis.get("recommendation", ""),
-        "saved": False,
-        "contact_id": None,
-        "created_at": now_str(),
-    }
-    db_data["calls"].append(call)
-    db_write()
-
     return {
-        "sessionId": f"done_{call['id']}",
-        "phone": session["phone"],
-        "duration": duration,
+        "phone":     session["phone"],
+        "duration":  duration,
         "transcript": transcript,
-        "analysis": analysis,
+        "analysis":  analysis,
+        "audioId":   audio_id,  # non-null for Android source; desktop saves its own audio
     }
 
 
@@ -904,13 +495,13 @@ async def websocket_endpoint(websocket: WebSocket):
                 continue
 
             if msg.get("type") == "call_start":
-                rand = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
+                rand       = "".join(random.choices(string.ascii_lowercase + string.digits, k=5))
                 session_id = f"session_{int(time.time() * 1000)}_{rand}"
                 sessions[session_id] = {
-                    "ws": websocket,
-                    "phone": msg.get("phone", "unknown"),
+                    "ws":        websocket,
+                    "phone":     msg.get("phone", "unknown"),
                     "managerId": msg.get("managerId", 1),
-                    "chunks": [],
+                    "chunks":    [],
                     "startTime": time.time(),
                 }
                 await websocket.send_text(json.dumps({"type": "session_started", "sessionId": session_id}))
@@ -922,7 +513,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "processing"}))
                 try:
                     duration = round(time.time() - session["startTime"])
-                    result = await _process_session(session, duration)
+                    result   = await _process_session(session, duration)
                     await websocket.send_text(json.dumps({"type": "call_analyzed", **result}, ensure_ascii=False))
                     print(f"[WS] analysis done → score={result.get('analysis', {}).get('score')}")
                 except Exception as e:
@@ -954,7 +545,7 @@ async def startup_banner():
     print(f"    ffmpeg : {'✓' if FFMPEG else '✗'}")
     print(f"    SIP    : ws://localhost:{os.getenv('FREEPBX_WS_PORT', '8088')}/ws")
     print(f"    exts   : {os.getenv('FREEPBX_EXTENSION', '?')}{' + ' + ext2 if ext2 else ''}")
-    print(f"    DB     : sales.json\n")
+    print(f"    DB     : managed by desktop app (local)\n")
 
 
 # ═══════════════════════════════════════════════════════════
