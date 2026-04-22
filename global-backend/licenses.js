@@ -97,6 +97,36 @@ export async function recordUsage({ key, deviceId = "unknown" }) {
   );
 }
 
+export async function updateLicense(key, fields) {
+  const allowed = ["plan", "max_devices", "requests_per_month", "expires_at", "customer", "is_active"];
+  const updates = [];
+  const vals    = [];
+  let idx = 1;
+
+  // If plan is changing, apply preset limits unless overridden
+  if (fields.plan && !fields.max_devices && !fields.requests_per_month) {
+    const limits = PLANS[fields.plan];
+    if (limits) {
+      fields.max_devices        = limits.max_devices;
+      fields.requests_per_month = limits.requests_per_month;
+    }
+  }
+
+  for (const [k, v] of Object.entries(fields)) {
+    if (!allowed.includes(k)) continue;
+    updates.push(`${k}=$${idx++}`);
+    vals.push(v);
+  }
+  if (!updates.length) throw new Error("No valid fields to update");
+  vals.push(key);
+  const { rows: [license] } = await pool.query(
+    `UPDATE licenses SET ${updates.join(", ")} WHERE key=$${idx} RETURNING *`,
+    vals
+  );
+  if (!license) throw new Error("License not found");
+  return license;
+}
+
 export async function revokeLicense(key) {
   await pool.query("UPDATE licenses SET is_active=false WHERE key=$1", [key]);
 }

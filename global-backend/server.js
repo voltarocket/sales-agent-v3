@@ -11,7 +11,7 @@ import dotenv from "dotenv";
 
 import {
   issueLicense, validateLicense, recordUsage,
-  revokeLicense, getLicenseStatus, waitForDb,
+  revokeLicense, updateLicense, getLicenseStatus, waitForDb,
 } from "./licenses.js";
 
 dotenv.config();
@@ -357,6 +357,18 @@ app.get("/licenses/:key/status", async (req, res) => {
     res.json(status);
   } catch (e) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// Update plan / limits / expiry (admin only)
+// Body: { plan?, max_devices?, requests_per_month?, expires_at?, customer? }
+app.patch("/licenses/:key", adminOnly, async (req, res) => {
+  try {
+    const license = await updateLicense(req.params.key, req.body);
+    console.log(`[LICENSE] updated key=${req.params.key} plan=${license.plan}`);
+    res.json({ ok: true, license });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
   }
 });
 
