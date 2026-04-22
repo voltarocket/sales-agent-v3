@@ -140,6 +140,14 @@ export async function activateLicense(globalUrl, key, queryFn) {
 }
 
 export async function checkRateLimit() {
+  // Dev mode — no restrictions
+  if (licenseState.plan === "dev") return { allowed: true };
+
+  // License checked and invalid — block
+  if (licenseState.checked && !licenseState.valid) {
+    return { allowed: false, reason: licenseState.reason || "license invalid" };
+  }
+
   const key   = licenseState.key || process.env.LICENSE_KEY;
   const limit = licenseState.limits.requests_per_month;
   if (!key || limit < 0) return { allowed: true };

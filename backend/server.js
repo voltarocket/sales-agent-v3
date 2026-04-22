@@ -168,6 +168,10 @@ async function processSession(session, duration) {
     // Check license rate limit before calling AI
     const rateCheck = await checkRateLimit();
     if (!rateCheck.allowed) {
+      if (rateCheck.reason) {
+        console.warn(`[WS] license blocked: ${rateCheck.reason}`);
+        throw new Error(`License error: ${rateCheck.reason}`);
+      }
       console.warn(`[WS] rate limit reached (${rateCheck.current}/${rateCheck.limit})`);
       throw new Error(`Monthly AI request limit reached (${rateCheck.current}/${rateCheck.limit})`);
     }
