@@ -3,12 +3,16 @@
   "version": "3.0.0",
   "private": true,
   "scripts": {
-    "dev":          "concurrently \"npm run dev:backend\" \"npm run dev:desktop\" --names \"backend,desktop\" --prefix-colors \"cyan,magenta\"",
-    "dev:all":      "concurrently \"npm run dev:backend\" \"npm run dev:desktop\" \"npm run dev:admin\" --names \"backend,client,admin\" --prefix-colors \"cyan,magenta,yellow\"",
-    "dev:backend":  "cd backend && npm run dev",
-    "dev:desktop":  "cd desktop && npm start",
-    "dev:admin":    "cd admin && npm start",
-    "install:all":  "npm install && cd backend && pip install -r requirements.txt && cd ../desktop && npm install && cd ../admin && npm install"
+    "dev":             "concurrently \"npm run dev:global\" \"npm run dev:local\" \"npm run dev:desktop\" --names \"global,local,desktop\" --prefix-colors \"blue,cyan,magenta\"",
+    "dev:all":         "concurrently \"npm run dev:global\" \"npm run dev:local\" \"npm run dev:desktop\" \"npm run dev:admin\" --names \"global,local,client,admin\" --prefix-colors \"blue,cyan,magenta,yellow\"",
+    "dev:global":      "cd global-backend && npm run dev",
+    "dev:local":       "cd backend && npm run dev",
+    "dev:desktop":     "cd desktop && npm start",
+    "dev:admin":       "cd admin && npm start",
+    "docker:up":       "docker compose up --build",
+    "docker:down":     "docker compose down",
+    "docker:logs":     "docker compose logs -f",
+    "install:all":     "npm install && cd backend && npm install && cd ../global-backend && npm install && cd ../desktop && npm install && cd ../admin && npm install"
   },
   "devDependencies": { "concurrently": "^8.2.2" }
 }

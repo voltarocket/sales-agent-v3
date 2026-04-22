@@ -9,9 +9,9 @@ WORKDIR /app
 COPY package.json .
 RUN npm install --omit=dev
 
-COPY server.js db.js redis.js ./
+COPY server.js .
 RUN mkdir -p uploads
 
-EXPOSE 3001
+EXPOSE 3002
 
 CMD ["node", "server.js"]

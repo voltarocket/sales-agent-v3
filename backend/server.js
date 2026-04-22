@@ -11,53 +11,22 @@ import dotenv from "dotenv";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
 
+import { pool, query, waitForDb } from "./db.js";
+import { redis, setJob, getJob } from "./redis.js";
+
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app    = express();
 const server = createServer(app);
 const wss    = new WebSocketServer({ server, path: "/" });
-
 const upload = multer({ dest: "uploads/", limits: { fileSize: 500 * 1024 * 1024 } });
 
 app.use(cors({ origin: "*" }));
 app.use(express.json());
 
 // ═══════════════════════════════════════════════════════════
-// DATABASE — lowdb (pure JS, no compilation needed)
-// ═══════════════════════════════════════════════════════════
-import { Low } from "lowdb";
-import { JSONFile } from "lowdb/node";
-
-const adapter = new JSONFile("sales.json");
-const db = new Low(adapter, {
-  contacts: [],
-  calls: [],
-  managers: [{ id: 1, name: "Менеджер", avatar: "МН", color: "#6366f1", violations: 0, calls_count: 0, avg_score: null }],
-});
-await db.read();
-console.log("[DB] lowdb ready → sales.json");
-
-function nextId(arr) {
-  return arr.length === 0 ? 1 : Math.max(...arr.map(r => r.id)) + 1;
-}
-function now() {
-  return new Date().toLocaleString("ru").replace(",", "");
-}
-
-// ═══════════════════════════════════════════════════════════
-// PROVIDERS
-// ═══════════════════════════════════════════════════════════
-const TRANSCRIBE = process.env.GROQ_API_KEY  ? "groq"
-  : process.env.YANDEX_API_KEY              ? "yandex"
-  : null;
-
-const ANALYZE = process.env.YANDEX_API_KEY  ? "yandex"
-  : process.env.GROQ_API_KEY               ? "groq"
-  : null;
-
-// ═══════════════════════════════════════════════════════════
-// FFMPEG
+// FFMPEG  (local — only for PCM → WAV pre-processing)
 // ═══════════════════════════════════════════════════════════
 function findFfmpeg() {
   const candidates = [
@@ -81,34 +50,40 @@ function findFfmpeg() {
 }
 const FFMPEG = findFfmpeg();
 
-function toWav(inputPath) {
-  if (!FFMPEG) return null;
-  const out = inputPath + ".wav";
-  const r = spawnSync(FFMPEG,
-    ["-y", "-i", inputPath, "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le", out],
-    { encoding: "utf8", timeout: 60000 });
-  return r.status === 0 ? out : null;
-}
+// ═══════════════════════════════════════════════════════════
+// GLOBAL BACKEND — AI gateway
+// ═══════════════════════════════════════════════════════════
+const GLOBAL_URL = process.env.GLOBAL_BACKEND_URL || "http://localhost:3002";
 
-function splitWav(wavPath) {
-  if (!FFMPEG) return [wavPath];
-  const dir = wavPath + "_chunks";
-  fs.mkdirSync(dir, { recursive: true });
-  const r = spawnSync(FFMPEG,
-    ["-y", "-i", wavPath, "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
-     "-f", "segment", "-segment_time", "30", path.join(dir, "chunk_%03d.wav")],
-    { encoding: "utf8", timeout: 120000 });
-  if (r.status !== 0) return [wavPath];
-  const chunks = fs.readdirSync(dir).filter(f => f.endsWith(".wav")).sort().map(f => path.join(dir, f));
-  return chunks.length ? chunks : [wavPath];
+async function sendToGlobalBackend(wavPath, managerName, phone) {
+  const form = new FormData();
+  form.append("audio", fs.createReadStream(wavPath), {
+    filename: "audio.wav",
+    contentType: "audio/wav",
+  });
+  form.append("managerName", managerName || "Менеджер");
+  form.append("phone", phone || "unknown");
+
+  const r = await fetch(`${GLOBAL_URL}/process`, {
+    method: "POST",
+    headers: form.getHeaders(),
+    body: form,
+    timeout: 120000,
+  });
+
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(e.error || `Global backend error ${r.status}`);
+  }
+  return r.json();
 }
 
 // ═══════════════════════════════════════════════════════════
-// WEBSOCKET — Android streaming session
+// WEBSOCKET — audio streaming sessions
 // ═══════════════════════════════════════════════════════════
-const sessions = new Map(); // sessionId → { ws, phone, managerId, chunks, startTime }
+const sessions = new Map();
 
-function broadcastHttp(data) {
+function broadcast(data) {
   const msg = JSON.stringify(data);
   wss.clients.forEach(c => { if (c.readyState === 1) c.send(msg); });
 }
@@ -118,23 +93,21 @@ wss.on("connection", ws => {
   let sessionId = null;
 
   ws.on("message", async (data) => {
-    // Binary = audio chunk
     if (Buffer.isBuffer(data) && sessionId && sessions.has(sessionId)) {
       sessions.get(sessionId).chunks.push(data);
       return;
     }
 
-    // Text = control message
     let msg;
-    try { msg = JSON.parse(data.toString()); }
-    catch (_) { return; }
+    try { msg = JSON.parse(data.toString()); } catch (_) { return; }
 
     if (msg.type === "call_start") {
-      sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2,7)}`;
+      sessionId = `session_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
       sessions.set(sessionId, {
         ws,
         phone: msg.phone || "unknown",
-        managerId: msg.managerId || 1,
+        managerId: msg.managerId || null,
+        managerName: msg.managerName || "Менеджер",
         chunks: [],
         startTime: Date.now(),
       });
@@ -149,13 +122,18 @@ wss.on("connection", ws => {
 
       ws.send(JSON.stringify({ type: "processing" }));
 
+      const jobId = sessionId;
+      await setJob(jobId, "processing");
+
       try {
         const duration = Math.round((Date.now() - session.startTime) / 1000);
-        const result = await processSession(session, duration);
+        const result   = await processSession(session, duration);
+        await setJob(jobId, "done", { callId: result.callId });
         ws.send(JSON.stringify({ type: "call_analyzed", ...result }));
-        console.log(`[WS] analysis done → score=${result.analysis?.score}`);
+        console.log(`[WS] done → callId=${result.callId} score=${result.analysis?.score}`);
       } catch (e) {
         console.error("[WS] processing error:", e.message);
+        await setJob(jobId, "error", { error: e.message });
         ws.send(JSON.stringify({ type: "error", error: e.message }));
       }
 
@@ -169,80 +147,61 @@ wss.on("connection", ws => {
   });
 
   ws.on("error", (e) => console.error("[WS] error:", e.message));
-
   ws.send(JSON.stringify({ type: "connected", ts: Date.now() }));
 });
 
 async function processSession(session, duration) {
-  // Склеиваем чанки в один буфер
   const audioBuffer = Buffer.concat(session.chunks);
   console.log(`[WS] audio buffer: ${audioBuffer.length} bytes, duration: ${duration}s`);
 
   let transcript = "";
+  let analysis   = { summary: "", score: 0, errors: [], positives: [], recommendation: "" };
 
-  if (audioBuffer.length > 1000 && TRANSCRIBE) {
-    // Сохраняем во временный файл
-    const tmpPath = path.join("uploads", `ws_${Date.now()}.pcm`);
-    const wavPath = tmpPath + ".wav";
-    fs.writeFileSync(tmpPath, audioBuffer);
+  if (audioBuffer.length > 1000 && FFMPEG) {
+    const tmpPcm = path.join("uploads", `ws_${Date.now()}.pcm`);
+    const tmpWav = tmpPcm + ".wav";
+    fs.writeFileSync(tmpPcm, audioBuffer);
 
     try {
-      // Конвертируем PCM 16bit mono 16000Hz → wav
-      if (FFMPEG) {
-        const r = spawnSync(FFMPEG, [
-          "-y",
-          "-f", "s16le",
-          "-ar", "16000",
-          "-ac", "1",
-          "-i", tmpPath,
-          wavPath,
-        ], { encoding: "utf8", timeout: 30000 });
+      const r = spawnSync(FFMPEG, [
+        "-y", "-f", "s16le", "-ar", "16000", "-ac", "1",
+        "-i", tmpPcm, tmpWav,
+      ], { encoding: "utf8", timeout: 30000 });
 
-        if (r.status === 0) {
-          const res = await transcribeGroq(wavPath, "audio.wav", "audio/wav");
-          transcript = res.text;
-        }
-        if (fs.existsSync(wavPath)) fs.unlinkSync(wavPath);
+      if (r.status === 0) {
+        const result = await sendToGlobalBackend(tmpWav, session.managerName, session.phone);
+        transcript = result.transcript || "";
+        analysis   = result.analysis   || analysis;
+      } else {
+        console.warn("[WS] ffmpeg convert failed:", r.stderr);
       }
+
+      if (fs.existsSync(tmpWav)) fs.unlinkSync(tmpWav);
     } finally {
-      if (fs.existsSync(tmpPath)) fs.unlinkSync(tmpPath);
+      if (fs.existsSync(tmpPcm)) fs.unlinkSync(tmpPcm);
     }
   }
 
-  // Анализируем
-  let analysis = { summary: "", score: 0, errors: [], positives: [], recommendation: "" };
-  if (transcript && ANALYZE) {
-    try {
-      const raw   = await analyzeGroq("Менеджер", transcript);
-      const clean = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-      analysis = JSON.parse(clean);
-    } catch (e) {
-      console.error("[WS] analyze error:", e.message);
-    }
-  }
-
-  // Сохраняем звонок
-  const call = {
-    id: nextId(db.data.calls),
-    phone: session.phone,
-    direction: "outbound",
-    duration,
-    transcript,
-    summary: analysis.summary || "",
-    score: analysis.score || 0,
-    errors: analysis.errors || [],
-    positives: analysis.positives || [],
-    recommendation: analysis.recommendation || "",
-    saved: false,
-    contact_id: null,
-    created_at: now(),
-  };
-  db.data.calls.push(call);
-  await db.write();
+  const { rows: [call] } = await query(
+    `INSERT INTO calls
+       (phone, direction, duration, transcript, summary, score, errors, positives, recommendation, manager_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+     RETURNING *`,
+    [
+      session.phone, "outbound", duration,
+      transcript,
+      analysis.summary        || "",
+      analysis.score          || 0,
+      JSON.stringify(analysis.errors    || []),
+      JSON.stringify(analysis.positives || []),
+      analysis.recommendation || "",
+      session.managerId       || null,
+    ]
+  );
 
   return {
-    sessionId: `done_${call.id}`,
-    phone: session.phone,
+    callId: call.id,
+    phone:  session.phone,
     duration,
     transcript,
     analysis,
@@ -250,16 +209,43 @@ async function processSession(session, duration) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// JOB STATUS
+// ═══════════════════════════════════════════════════════════
+app.get("/api/jobs/:jobId", async (req, res) => {
+  const job = await getJob(req.params.jobId);
+  if (!job) return res.status(404).json({ error: "Job not found" });
+  res.json(job);
+});
+
+// ═══════════════════════════════════════════════════════════
 // HEALTH
 // ═══════════════════════════════════════════════════════════
-app.get("/api/health", (_, res) => res.json({
-  ok: true, transcribe: TRANSCRIBE, analyze: ANALYZE, ffmpeg: !!FFMPEG,
-  sip: {
-    host: process.env.FREEPBX_HOST || "localhost",
-    wsPort: process.env.FREEPBX_WS_PORT || "8088",
-    extension: process.env.FREEPBX_EXTENSION || "not set",
-  },
-}));
+app.get("/api/health", async (_, res) => {
+  let globalOk = false;
+  try {
+    const r = await fetch(`${GLOBAL_URL}/health`, { timeout: 3000 });
+    globalOk = r.ok;
+  } catch (_) {}
+
+  let dbOk = false;
+  try { await pool.query("SELECT 1"); dbOk = true; } catch (_) {}
+
+  let redisOk = false;
+  try { await redis.ping(); redisOk = true; } catch (_) {}
+
+  res.json({
+    ok: true,
+    db: dbOk,
+    redis: redisOk,
+    globalBackend: globalOk,
+    ffmpeg: !!FFMPEG,
+    sip: {
+      host:      process.env.FREEPBX_HOST    || "localhost",
+      wsPort:    process.env.FREEPBX_WS_PORT || "8088",
+      extension: process.env.FREEPBX_EXTENSION || "not set",
+    },
+  });
+});
 
 // ═══════════════════════════════════════════════════════════
 // SIP CONFIG
@@ -290,115 +276,52 @@ app.get("/api/sip/config", (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// TRANSCRIPTION
+// TRANSCRIPTION  (proxy to global backend)
 // ═══════════════════════════════════════════════════════════
-async function transcribeGroq(filePath, originalName, mimetype) {
-  const form = new FormData();
-  form.append("file", fs.createReadStream(filePath), {
-    filename: originalName || "audio.wav",
-    contentType: mimetype || "audio/wav",
-  });
-  form.append("model", "whisper-large-v3");
-  form.append("language", "ru");
-  form.append("response_format", "verbose_json");
-  const r = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${process.env.GROQ_API_KEY}`, ...form.getHeaders() },
-    body: form,
-  });
-  if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message || `Groq ${r.status}`); }
-  const d = await r.json();
-  return { text: d.text, duration: d.duration };
-}
-
-async function transcribeYandexChunk(wavPath) {
-  const data = fs.readFileSync(wavPath);
-  if (data.length > 1024 * 1024) throw new Error("Chunk > 1MB");
-  const url = new URL("https://stt.api.cloud.yandex.net/speech/v1/stt:recognize");
-  url.searchParams.set("folderId", process.env.YANDEX_FOLDER_ID);
-  url.searchParams.set("lang", "ru-RU");
-  const r = await fetch(url.toString(), {
-    method: "POST",
-    headers: { Authorization: `Api-Key ${process.env.YANDEX_API_KEY}`, "Content-Type": "audio/wav" },
-    body: data,
-  });
-  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.error_message || `SpeechKit ${r.status}`); }
-  return (await r.json()).result || "";
-}
-
-async function transcribeYandex(filePath) {
-  const wav = toWav(filePath);
-  const chunks = splitWav(wav || filePath);
-  const parts = [];
-  for (const c of chunks) parts.push(await transcribeYandexChunk(c));
-  if (wav && fs.existsSync(wav)) fs.unlinkSync(wav);
-  return { text: parts.join(" ").trim(), duration: null };
-}
-
 app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No file" });
-  if (!TRANSCRIBE) {
-    fs.unlinkSync(req.file.path);
-    return res.status(500).json({ error: "No transcription key in .env" });
-  }
+
   try {
-    let result;
-    if (TRANSCRIBE === "groq")   result = await transcribeGroq(req.file.path, req.file.originalname, req.file.mimetype);
-    else                         result = await transcribeYandex(req.file.path);
-    fs.unlinkSync(req.file.path);
-    console.log(`[STT] ${TRANSCRIBE} OK | ${result.text.length} chars`);
-    res.json({ transcript: result.text, duration: result.duration });
+    const form = new FormData();
+    form.append("audio", fs.createReadStream(req.file.path), {
+      filename: req.file.originalname || "audio",
+      contentType: req.file.mimetype,
+    });
+    form.append("managerName", req.body.managerName || "Менеджер");
+
+    const r = await fetch(`${GLOBAL_URL}/process`, {
+      method: "POST",
+      headers: form.getHeaders(),
+      body: form,
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Global ${r.status}`); }
+    const d = await r.json();
+    res.json({ transcript: d.transcript, duration: d.duration });
   } catch (e) {
-    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
-    console.error("[STT]", e.message);
+    console.error("[STT proxy]", e.message);
     res.status(500).json({ error: e.message });
+  } finally {
+    if (fs.existsSync(req.file.path)) fs.unlinkSync(req.file.path);
   }
 });
 
 // ═══════════════════════════════════════════════════════════
-// ANALYSIS
+// ANALYSIS  (proxy to global backend — text only path)
 // ═══════════════════════════════════════════════════════════
-const SYS = "Ты — тренер по продажам. Отвечай ТОЛЬКО валидным JSON без markdown.";
-const buildPrompt = (name, transcript) =>
-  `Проанализируй звонок менеджера "${name}".\nТранскрипт: ${transcript}\nJSON:\n{"summary":"2-3 предложения","score":0-100,"errors":[{"title":"","description":"","severity":"high|medium|low","timestamp":""}],"positives":[""],"recommendation":"","nextStepSuggestion":""}`;
-
-async function analyzeGroq(name, transcript) {
-  const r = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
-    body: JSON.stringify({
-      model: "llama-3.3-70b-versatile", temperature: 0.2, max_tokens: 2000,
-      messages: [{ role: "system", content: SYS }, { role: "user", content: buildPrompt(name, transcript) }],
-    }),
-  });
-  if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message); }
-  return (await r.json()).choices[0]?.message?.content || "";
-}
-
-async function analyzeYandex(name, transcript) {
-  const r = await fetch("https://llm.api.cloud.yandex.net/foundationModels/v1/completion", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Api-Key ${process.env.YANDEX_API_KEY}` },
-    body: JSON.stringify({
-      modelUri: `gpt://${process.env.YANDEX_FOLDER_ID}/yandexgpt-lite/latest`,
-      completionOptions: { stream: false, temperature: 0.2, maxTokens: 2000 },
-      messages: [{ role: "system", text: SYS }, { role: "user", text: buildPrompt(name, transcript) }],
-    }),
-  });
-  if (!r.ok) { const e = await r.json().catch(()=>({})); throw new Error(e.message); }
-  return (await r.json()).result?.alternatives?.[0]?.message?.text || "";
-}
-
 app.post("/api/analyze", async (req, res) => {
   const { managerName = "Менеджер", transcript } = req.body;
   if (!transcript) return res.status(400).json({ error: "transcript required" });
-  if (!ANALYZE)    return res.status(500).json({ error: "No analysis key in .env" });
+
   try {
-    const raw   = ANALYZE === "yandex" ? await analyzeYandex(managerName, transcript) : await analyzeGroq(managerName, transcript);
-    const clean = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/i, "").trim();
-    res.json(JSON.parse(clean));
+    const r = await fetch(`${GLOBAL_URL}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ managerName, transcript }),
+    });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); throw new Error(e.error || `Global ${r.status}`); }
+    res.json(await r.json());
   } catch (e) {
-    console.error("[LLM]", e.message);
+    console.error("[LLM proxy]", e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -406,127 +329,210 @@ app.post("/api/analyze", async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // CALLS API
 // ═══════════════════════════════════════════════════════════
-app.get("/api/calls", (_, res) => res.json([...db.data.calls].reverse()));
+app.get("/api/calls", async (_, res) => {
+  const { rows } = await query("SELECT * FROM calls ORDER BY created_at DESC");
+  res.json(rows);
+});
 
 app.post("/api/calls", async (req, res) => {
-  const call = {
-    id: nextId(db.data.calls),
-    phone: req.body.phone || "",
-    direction: req.body.direction || "outbound",
-    duration: req.body.duration || 0,
-    transcript: req.body.transcript || "",
-    summary: req.body.summary || "",
-    score: req.body.score || null,
-    errors: req.body.errors || [],
-    positives: req.body.positives || [],
-    recommendation: req.body.recommendation || "",
-    saved: req.body.saved ? true : false,
-    contact_id: req.body.contact_id || null,
-    created_at: now(),
-  };
-  db.data.calls.push(call);
-  await db.write();
-  broadcastHttp({ type: "call_saved", id: call.id, phone: call.phone });
+  const { phone = "", direction = "outbound", duration = 0, transcript = "",
+          summary = "", score = null, errors = [], positives = [],
+          recommendation = "", saved = false, contact_id = null, manager_id = null } = req.body;
+
+  const { rows: [call] } = await query(
+    `INSERT INTO calls
+       (phone, direction, duration, transcript, summary, score, errors, positives, recommendation, saved, contact_id, manager_id)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+     RETURNING *`,
+    [phone, direction, duration, transcript, summary, score,
+     JSON.stringify(errors), JSON.stringify(positives), recommendation,
+     saved, contact_id, manager_id]
+  );
+
+  broadcast({ type: "call_saved", id: call.id, phone: call.phone });
   res.json({ ok: true, id: call.id });
 });
 
+app.put("/api/calls/:id", async (req, res) => {
+  const { admin_comment, saved, contact_id } = req.body;
+  const parts = [];
+  const vals  = [];
+  let idx = 1;
+  if (admin_comment !== undefined) { parts.push(`admin_comment=$${idx++}`); vals.push(admin_comment); }
+  if (saved         !== undefined) { parts.push(`saved=$${idx++}`);         vals.push(saved); }
+  if (contact_id    !== undefined) { parts.push(`contact_id=$${idx++}`);    vals.push(contact_id); }
+  if (!parts.length) return res.json({ ok: true });
+  vals.push(+req.params.id);
+  await query(`UPDATE calls SET ${parts.join(", ")} WHERE id=$${idx}`, vals);
+  res.json({ ok: true });
+});
+
 app.delete("/api/calls/:id", async (req, res) => {
-  db.data.calls = db.data.calls.filter(c => c.id !== +req.params.id);
-  await db.write();
+  await query("DELETE FROM calls WHERE id=$1", [+req.params.id]);
   res.json({ ok: true });
 });
 
 // ═══════════════════════════════════════════════════════════
 // CONTACTS API
 // ═══════════════════════════════════════════════════════════
-app.get("/api/contacts", (_, res) => res.json([...db.data.contacts].reverse()));
+app.get("/api/contacts", async (_, res) => {
+  const { rows } = await query("SELECT * FROM contacts ORDER BY created_at DESC");
+  res.json(rows);
+});
 
-app.get("/api/contacts/:id", (req, res) => {
-  const c = db.data.contacts.find(c => c.id === +req.params.id);
-  if (!c) return res.status(404).json({ error: "Not found" });
-  const calls = db.data.calls.filter(call => call.contact_id === c.id).reverse();
-  res.json({ ...c, calls });
+app.get("/api/contacts/:id", async (req, res) => {
+  const { rows: [contact] } = await query("SELECT * FROM contacts WHERE id=$1", [+req.params.id]);
+  if (!contact) return res.status(404).json({ error: "Not found" });
+  const { rows: calls } = await query("SELECT * FROM calls WHERE contact_id=$1 ORDER BY created_at DESC", [contact.id]);
+  res.json({ ...contact, calls });
 });
 
 app.post("/api/contacts", async (req, res) => {
   const { phone, company, name, summary, transcript, score, errors, recommendation, call_id } = req.body;
-  const existing = db.data.contacts.find(c => c.phone === phone);
+
+  const { rows: [existing] } = await query("SELECT * FROM contacts WHERE phone=$1", [phone]);
   let contactId;
+
   if (existing) {
-    existing.company        = company        || existing.company;
-    existing.name           = name           || existing.name;
-    existing.summary        = summary        || existing.summary;
-    existing.transcript     = transcript     || existing.transcript;
-    existing.score          = score          || existing.score;
-    existing.errors         = errors         || existing.errors;
-    existing.recommendation = recommendation || existing.recommendation;
-    existing.calls_count    = (existing.calls_count || 1) + 1;
-    existing.updated_at     = now();
+    await query(
+      `UPDATE contacts SET
+         company=$1, name=$2, summary=$3, transcript=$4, score=$5,
+         errors=$6, recommendation=$7,
+         calls_count=calls_count+1, updated_at=NOW()
+       WHERE id=$8`,
+      [
+        company        || existing.company,
+        name           || existing.name,
+        summary        || existing.summary,
+        transcript     || existing.transcript,
+        score          || existing.score,
+        JSON.stringify(errors || existing.errors || []),
+        recommendation || existing.recommendation,
+        existing.id,
+      ]
+    );
     contactId = existing.id;
   } else {
-    const contact = {
-      id: nextId(db.data.contacts),
-      phone, company: company || "", name: name || "",
-      summary: summary || "", transcript: transcript || "",
-      score: score || null, errors: errors || [],
-      recommendation: recommendation || "",
-      calls_count: 1,
-      created_at: now(), updated_at: now(),
-    };
-    db.data.contacts.push(contact);
-    contactId = contact.id;
+    const { rows: [c] } = await query(
+      `INSERT INTO contacts (phone, company, name, summary, transcript, score, errors, recommendation)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`,
+      [phone, company || "", name || "", summary || "", transcript || "",
+       score || null, JSON.stringify(errors || []), recommendation || ""]
+    );
+    contactId = c.id;
   }
+
   if (call_id) {
-    const call = db.data.calls.find(c => c.id === call_id);
-    if (call) { call.saved = true; call.contact_id = contactId; }
+    await query("UPDATE calls SET saved=true, contact_id=$1 WHERE id=$2", [contactId, call_id]);
   }
-  await db.write();
-  broadcastHttp({ type: "contact_saved", id: contactId, phone, company });
+
+  broadcast({ type: "contact_saved", id: contactId, phone, company });
   res.json({ ok: true, id: contactId });
 });
 
 app.put("/api/contacts/:id", async (req, res) => {
-  const c = db.data.contacts.find(c => c.id === +req.params.id);
-  if (!c) return res.status(404).json({ error: "Not found" });
-  Object.assign(c, { ...req.body, updated_at: now() });
-  await db.write();
+  const { rows: [existing] } = await query("SELECT * FROM contacts WHERE id=$1", [+req.params.id]);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+
+  const b = req.body;
+  await query(
+    `UPDATE contacts SET
+       phone=$1, company=$2, name=$3, summary=$4, transcript=$5,
+       score=$6, errors=$7, recommendation=$8, updated_at=NOW()
+     WHERE id=$9`,
+    [
+      b.phone          ?? existing.phone,
+      b.company        ?? existing.company,
+      b.name           ?? existing.name,
+      b.summary        ?? existing.summary,
+      b.transcript     ?? existing.transcript,
+      b.score          ?? existing.score,
+      JSON.stringify(b.errors ?? existing.errors ?? []),
+      b.recommendation ?? existing.recommendation,
+      existing.id,
+    ]
+  );
   res.json({ ok: true });
 });
 
 app.delete("/api/contacts/:id", async (req, res) => {
-  db.data.contacts = db.data.contacts.filter(c => c.id !== +req.params.id);
-  await db.write();
+  await query("DELETE FROM contacts WHERE id=$1", [+req.params.id]);
   res.json({ ok: true });
 });
 
 // ═══════════════════════════════════════════════════════════
 // MANAGERS API
 // ═══════════════════════════════════════════════════════════
-app.get("/api/managers", (_, res) => res.json(db.data.managers));
+app.get("/api/managers", async (_, res) => {
+  const { rows } = await query("SELECT * FROM managers ORDER BY id");
+  res.json(rows);
+});
 
 app.post("/api/managers", async (req, res) => {
   const { name, color } = req.body;
-  const initials = name.trim().split(" ").map(w=>w[0]).join("").toUpperCase().slice(0,2);
-  const mgr = { id: nextId(db.data.managers), name: name.trim(), avatar: initials, color: color||"#6366f1", violations: 0, calls_count: 0, avg_score: null };
-  db.data.managers.push(mgr);
-  await db.write();
+  const avatar = name.trim().split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
+  const { rows: [mgr] } = await query(
+    "INSERT INTO managers (name, avatar, color) VALUES ($1,$2,$3) RETURNING *",
+    [name.trim(), avatar, color || "#6366f1"]
+  );
   res.json({ ok: true, id: mgr.id });
 });
 
+app.put("/api/managers/:id", async (req, res) => {
+  const { name, color, avatar } = req.body;
+  const { rows: [existing] } = await query("SELECT * FROM managers WHERE id=$1", [+req.params.id]);
+  if (!existing) return res.status(404).json({ error: "Not found" });
+  await query(
+    "UPDATE managers SET name=$1, color=$2, avatar=$3 WHERE id=$4",
+    [name ?? existing.name, color ?? existing.color, avatar ?? existing.avatar, existing.id]
+  );
+  res.json({ ok: true });
+});
+
+app.delete("/api/managers/:id", async (req, res) => {
+  await query("DELETE FROM managers WHERE id=$1", [+req.params.id]);
+  res.json({ ok: true });
+});
+
 app.post("/api/managers/:id/stats", async (req, res) => {
-  const mgr = db.data.managers.find(m => m.id === +req.params.id);
-  if (!mgr) return res.status(404).json({ error: "Not found" });
   const { score = 0, violations = 0 } = req.body;
-  mgr.calls_count += 1;
-  mgr.avg_score = mgr.avg_score === null ? score : Math.round((mgr.avg_score * (mgr.calls_count-1) + score) / mgr.calls_count);
-  mgr.violations += violations;
-  await db.write();
+  const { rows: [mgr] } = await query("SELECT * FROM managers WHERE id=$1", [+req.params.id]);
+  if (!mgr) return res.status(404).json({ error: "Not found" });
+
+  const newCount = mgr.calls_count + 1;
+  const newAvg   = mgr.avg_score === null
+    ? score
+    : Math.round((Number(mgr.avg_score) * mgr.calls_count + score) / newCount);
+
+  await query(
+    "UPDATE managers SET calls_count=$1, avg_score=$2, violations=violations+$3 WHERE id=$4",
+    [newCount, newAvg, violations, mgr.id]
+  );
   res.json({ ok: true });
 });
 
 app.delete("/api/managers/:id/reset", async (req, res) => {
-  const mgr = db.data.managers.find(m => m.id === +req.params.id);
-  if (mgr) { mgr.violations = 0; mgr.calls_count = 0; mgr.avg_score = null; await db.write(); }
+  await query(
+    "UPDATE managers SET violations=0, calls_count=0, avg_score=NULL WHERE id=$1",
+    [+req.params.id]
+  );
+  res.json({ ok: true });
+});
+
+// ═══════════════════════════════════════════════════════════
+// SETTINGS API
+// ═══════════════════════════════════════════════════════════
+app.get("/api/settings", async (_, res) => {
+  const { rows } = await query("SELECT key, value FROM settings");
+  res.json(Object.fromEntries(rows.map(r => [r.key, r.value])));
+});
+
+app.put("/api/settings/:key", async (req, res) => {
+  const { value } = req.body;
+  await query(
+    "INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2",
+    [req.params.key, String(value)]
+  );
   res.json({ ok: true });
 });
 
@@ -534,7 +540,7 @@ app.delete("/api/managers/:id/reset", async (req, res) => {
 // NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════
 app.post("/api/notify", async (req, res) => {
-  const { to, managerName, violations, threshold } = req.body;
+  const { managerName, violations, threshold } = req.body;
   if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
     try {
       const r = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
@@ -550,20 +556,25 @@ app.post("/api/notify", async (req, res) => {
       return res.json({ ok: true, mode: "telegram" });
     } catch (e) { console.error("[NOTIFY]", e.message); }
   }
-  console.log(`[NOTIFY] ${managerName}: ${violations}/${threshold} → ${to}`);
+  console.log(`[NOTIFY] ${managerName}: ${violations}/${threshold}`);
   res.json({ ok: true, mode: "console" });
 });
 
 // ═══════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════
+fs.mkdirSync("uploads", { recursive: true });
+
+await waitForDb();
+await redis.connect().catch(() => {}); // non-fatal — Redis may not be available locally
+
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, "0.0.0.0", () => {
-  console.log(`\n🚀  http://localhost:${PORT}`);
-  console.log(`    STT    : ${TRANSCRIBE || "⚠ no key"}`);
-  console.log(`    LLM    : ${ANALYZE    || "⚠ no key"}`);
-  console.log(`    ffmpeg : ${FFMPEG ? "✓" : "✗"}`);
-  console.log(`    SIP    : ws://localhost:${process.env.FREEPBX_WS_PORT||8088}/ws`);
-  console.log(`    exts   : ${process.env.FREEPBX_EXTENSION||"?"}${process.env.FREEPBX_EXT_2 ? " + "+process.env.FREEPBX_EXT_2 : ""}`);
-  console.log(`    DB     : sales.json\n`);
+  console.log(`\n🚀  Local Backend → http://localhost:${PORT}`);
+  console.log(`    DB           : PostgreSQL`);
+  console.log(`    Redis        : ${process.env.REDIS_URL || "redis://localhost:6379"}`);
+  console.log(`    Global AI    : ${GLOBAL_URL}`);
+  console.log(`    ffmpeg       : ${FFMPEG ? "✓" : "✗"}`);
+  console.log(`    SIP          : ws://localhost:${process.env.FREEPBX_WS_PORT || 8088}/ws`);
+  console.log(`    exts         : ${process.env.FREEPBX_EXTENSION || "?"}${process.env.FREEPBX_EXT_2 ? " + " + process.env.FREEPBX_EXT_2 : ""}\n`);
 });

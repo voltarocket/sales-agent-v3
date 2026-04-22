@@ -1,11 +1,69 @@
 services:
-  backend:
+
+  # ─── Infrastructure ─────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       sales_agent
+      POSTGRES_USER:     sales
+      POSTGRES_PASSWORD: sales_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sales -d sales_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ─── Global Backend (AI Gateway) ────────────────────────
+  global-backend:
+    build: ./global-backend
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./global-backend/.env
+    volumes:
+      - global_uploads:/app/uploads
+
+  # ─── Local Backend (Business Logic) ─────────────────────
+  local-backend:
     build: ./backend
+    restart: unless-stopped
     ports:
       - "3001:3001"
     env_file:
       - ./backend/.env
+    environment:
+      DATABASE_URL:        postgresql://sales:sales_pass@postgres:5432/sales_agent
+      REDIS_URL:           redis://redis:6379
+      GLOBAL_BACKEND_URL:  http://global-backend:3002
     volumes:
-      - ./backend/sales.json:/app/sales.json
-      - ./backend/uploads:/app/uploads
-    restart: unless-stopped
+      - local_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      global-backend:
+        condition: service_started
+
+volumes:
+  postgres_data:
+  global_uploads:
+  local_uploads:
