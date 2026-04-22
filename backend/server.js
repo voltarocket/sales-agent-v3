@@ -13,7 +13,7 @@ import { WebSocketServer } from "ws";
 
 import { pool, query, waitForDb } from "./db.js";
 import { redis, setJob, getJob } from "./redis.js";
-import { licenseState, initLicense, checkRateLimit, trackUsage } from "./license.js";
+import { licenseState, initLicense, activateLicense, checkRateLimit, trackUsage } from "./license.js";
 
 dotenv.config();
 
@@ -295,16 +295,26 @@ app.get("/api/health", async (_, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
-// LICENSE STATUS
+// LICENSE STATUS + ACTIVATION
 // ═══════════════════════════════════════════════════════════
 app.get("/api/license/status", (_, res) => {
+  const k = licenseState.key;
   res.json({
     ...licenseState,
-    licenseKey: process.env.LICENSE_KEY
-      ? process.env.LICENSE_KEY.slice(0, 12) + "..." // mask key
-      : null,
-    deviceId: process.env.DEVICE_ID || null,
+    keyMasked: k ? k.slice(0, 14) + "…" : null,
+    deviceId:  process.env.DEVICE_ID || null,
   });
+});
+
+app.post("/api/license/activate", async (req, res) => {
+  const { key } = req.body;
+  if (!key?.trim()) return res.status(400).json({ error: "key required" });
+  try {
+    const result = await activateLicense(GLOBAL_URL, key.trim(), query);
+    res.json({ ok: true, ...result });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 // ═══════════════════════════════════════════════════════════
@@ -627,7 +637,7 @@ fs.mkdirSync("uploads", { recursive: true });
 
 await waitForDb();
 await redis.connect().catch(() => {}); // non-fatal — Redis may not be available locally
-await initLicense(GLOBAL_URL);
+await initLicense(GLOBAL_URL, query);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, "0.0.0.0", () => {

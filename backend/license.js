@@ -2,32 +2,48 @@ import os from "os";
 import fetch from "node-fetch";
 import { redis } from "./redis.js";
 
-const CACHE_KEY      = "license:status";
-const CACHE_TTL      = 3600;           // 1 hour
-const USAGE_KEY      = (key, month) => `usage:${key}:${month}`;
-const USAGE_TTL      = 60 * 60 * 24 * 35; // 35 days
+const CACHE_KEY = "license:status";
+const CACHE_TTL = 3600;
+const USAGE_KEY = (key, month) => `usage:${key}:${month}`;
+const USAGE_TTL = 60 * 60 * 24 * 35;
 
-// Resolved license state (set on startup, refreshed from cache)
 export const licenseState = {
-  checked:   false,
-  valid:     false,
-  plan:      null,
-  reason:    null,
-  limits:    { requests_per_month: -1, max_devices: -1 },
-  usage:     { used: 0, month: null },
+  checked:  false,
+  valid:    false,
+  plan:     null,
+  reason:   null,
+  key:      null,
+  limits:   { requests_per_month: -1, max_devices: -1 },
+  usage:    { used: 0, month: null },
+  expires_at: null,
+  customer: null,
 };
 
-export async function initLicense(globalUrl) {
-  const key      = process.env.LICENSE_KEY;
+// Read persisted key from settings table (fallback when env var not set)
+async function getStoredKey(queryFn) {
+  try {
+    const { rows } = await queryFn(
+      "SELECT value FROM settings WHERE key='license_key'", []
+    );
+    return rows[0]?.value || null;
+  } catch (_) { return null; }
+}
+
+export async function initLicense(globalUrl, queryFn) {
+  const envKey   = process.env.LICENSE_KEY;
+  const dbKey    = envKey ? null : await getStoredKey(queryFn);
+  const key      = envKey || dbKey;
   const deviceId = process.env.DEVICE_ID || generateDeviceId();
 
   if (!key) {
-    console.log("[LICENSE] No LICENSE_KEY set — running in dev mode (unlicensed)");
+    console.log("[LICENSE] No key configured — dev mode (unlicensed)");
     licenseState.checked = true;
-    licenseState.valid   = true; // dev mode: allow all
+    licenseState.valid   = true;
     licenseState.plan    = "dev";
     return;
   }
+
+  licenseState.key = key;
 
   // Try Redis cache first
   try {
@@ -40,7 +56,6 @@ export async function initLicense(globalUrl) {
     }
   } catch (_) {}
 
-  // Validate with global backend
   await refreshLicense(globalUrl, key, deviceId);
 }
 
@@ -54,27 +69,26 @@ export async function refreshLicense(globalUrl, key, deviceId) {
     });
 
     const data = await r.json();
-
     const update = {
-      valid:   data.valid ?? false,
-      plan:    data.plan  ?? null,
-      reason:  data.reason ?? null,
-      limits:  { requests_per_month: data.requests_per_month ?? -1, max_devices: data.max_devices ?? -1 },
-      usage:   data.usage ?? { used: 0, month: null },
+      key,
+      valid:      data.valid      ?? false,
+      plan:       data.plan       ?? null,
+      reason:     data.reason     ?? null,
+      customer:   data.customer   ?? null,
+      expires_at: data.expires_at ?? null,
+      limits:     { requests_per_month: data.requests_per_month ?? -1, max_devices: data.max_devices ?? -1 },
+      usage:      data.usage      ?? { used: 0, month: null },
     };
     Object.assign(licenseState, { checked: true, ...update });
 
-    // Cache in Redis
     try { await redis.set(CACHE_KEY, JSON.stringify(update), "EX", CACHE_TTL); } catch (_) {}
 
-    if (data.valid) {
+    if (data.valid)
       console.log(`[LICENSE] valid — plan=${data.plan} usage=${data.usage?.used}/${data.requests_per_month}`);
-    } else {
+    else
       console.warn(`[LICENSE] invalid — ${data.reason}`);
-    }
   } catch (e) {
     console.error("[LICENSE] validation failed:", e.message);
-    // Fail open on network errors — use cached state or allow
     licenseState.checked = true;
     if (!licenseState.plan) {
       licenseState.valid  = true;
@@ -84,34 +98,66 @@ export async function refreshLicense(globalUrl, key, deviceId) {
   }
 }
 
-// Check if this request is within rate limits (uses Redis counter)
+// Activate a new key: validate → persist to DB → refresh state
+export async function activateLicense(globalUrl, key, queryFn) {
+  const deviceId = process.env.DEVICE_ID || generateDeviceId();
+
+  // Validate first
+  const r = await fetch(`${globalUrl}/licenses/validate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ key, deviceId }),
+    timeout: 10000,
+  });
+  const data = await r.json();
+
+  if (!data.valid) throw new Error(data.reason || "Invalid license key");
+
+  // Persist to settings table
+  await queryFn(
+    `INSERT INTO settings (key, value) VALUES ('license_key', $1)
+     ON CONFLICT (key) DO UPDATE SET value=$1`,
+    [key]
+  );
+
+  // Clear Redis cache so next call re-validates
+  try { await redis.del(CACHE_KEY); } catch (_) {}
+
+  // Update in-memory state
+  const update = {
+    key,
+    valid:      true,
+    plan:       data.plan       ?? null,
+    reason:     null,
+    customer:   data.customer   ?? null,
+    expires_at: data.expires_at ?? null,
+    limits:     { requests_per_month: data.requests_per_month ?? -1, max_devices: data.max_devices ?? -1 },
+    usage:      data.usage      ?? { used: 0, month: null },
+  };
+  Object.assign(licenseState, { checked: true, ...update });
+
+  return update;
+}
+
 export async function checkRateLimit() {
-  const key   = process.env.LICENSE_KEY;
+  const key   = licenseState.key || process.env.LICENSE_KEY;
   const limit = licenseState.limits.requests_per_month;
+  if (!key || limit < 0) return { allowed: true };
 
-  if (!key || limit < 0) return { allowed: true }; // dev mode or unlimited
-
-  const month    = new Date().toISOString().slice(0, 7);
-  const rKey     = USAGE_KEY(key, month);
-  const current  = parseInt(await redis.get(rKey).catch(() => "0") || "0");
-
+  const month   = new Date().toISOString().slice(0, 7);
+  const current = parseInt(await redis.get(USAGE_KEY(key, month)).catch(() => "0") || "0");
   return { allowed: current < limit, current, limit };
 }
 
-// Increment local Redis counter + async-report to global backend
 export async function trackUsage(globalUrl) {
-  const key      = process.env.LICENSE_KEY;
+  const key      = licenseState.key || process.env.LICENSE_KEY;
   const deviceId = process.env.DEVICE_ID || "unknown";
   if (!key) return;
 
   const month = new Date().toISOString().slice(0, 7);
   const rKey  = USAGE_KEY(key, month);
-  try {
-    await redis.incr(rKey);
-    await redis.expire(rKey, USAGE_TTL);
-  } catch (_) {}
+  try { await redis.incr(rKey); await redis.expire(rKey, USAGE_TTL); } catch (_) {}
 
-  // Async report — don't await
   fetch(`${globalUrl}/licenses/usage`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

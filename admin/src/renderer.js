@@ -30,14 +30,11 @@ const S = {
   threshold: 5,
 
   // Licenses page
-  licenses:       [],
-  plans:          [],
-  licBusy:        false,
-  licError:       "",
-  issueForm:      { customer:"", plan:"basic" },
-  editingPlan:    null,   // plan object being edited
-  addPlanForm:    { name:"", display_name:"", max_devices:1, requests_per_month:100, description:"" },
-  editLicForm:    { key:"", plan:"" },
+  licStatus:   null,   // license status object from backend
+  licBusy:     false,
+  licError:    "",
+  licSuccess:  "",
+  activateKey: "",     // key being entered
 };
 
 // ═══════════════════════════════════════════════════════════
@@ -69,15 +66,11 @@ async function loadMgrCalls(mgrId) {
   S.mgrCalls = await window.api.get(`/api/managers/${mgrId}/calls`).catch(()=>[]);
 }
 
-async function loadLicenses() {
+async function loadLicenseStatus() {
   S.licBusy = true; render();
-  const [licenses, plans] = await Promise.all([
-    window.api.get("/api/licenses").catch(()=>[]),
-    window.api.get("/api/plans").catch(()=>[]),
-  ]);
-  S.licenses = Array.isArray(licenses) ? licenses : [];
-  S.plans    = Array.isArray(plans)    ? plans    : [];
-  S.licBusy  = false; render();
+  const status = await window.api.get("/api/license/status").catch(()=>null);
+  S.licStatus = status;
+  S.licBusy   = false; render();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -170,8 +163,7 @@ function topbar() {
 </div>`;
   if (S.page === "licenses") return `
 <div class="topbar">
-  <div><div class="pt">Лицензии</div><div class="ps">${S.plans.length} планов · ${S.licenses.length} лицензий</div></div>
-  <button class="btn-primary" id="btn-issue-license">+ Выдать лицензию</button>
+  <div><div class="pt">Лицензия</div><div class="ps">Активация и статус лицензии системы</div></div>
 </div>`;
   const title = S.selected ? esc(S.selected.name) : "Менеджеры";
   const sub   = S.selected
@@ -458,148 +450,75 @@ function modalDelete() {
 // ═══════════════════════════════════════════════════════════
 function pageLicenses() {
   if (S.licBusy) return `<div class="empty"><span class="spinner"></span></div>`;
-  const inf = v => v === -1 || v === "-1" ? "∞" : v;
-  const planOpts = S.plans.map(p =>
-    `<option value="${esc(p.name)}">${esc(p.display_name||p.name)}</option>`).join("");
 
-  return `
-<div style="display:flex;flex-direction:column;gap:24px">
+  const st  = S.licStatus;
+  const inf = v => (v === -1 || v == null) ? "∞" : v;
 
-  <!-- Plans section -->
-  <div>
-    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-      <div style="font-size:13px;font-weight:600;color:var(--text2);letter-spacing:.5px;text-transform:uppercase">Тарифные планы</div>
-      <button class="btn-ghost btn-sm" id="btn-add-plan">+ Добавить план</button>
+  // Status card
+  let statusCard = "";
+  if (st) {
+    const isDev     = st.plan === "dev";
+    const isValid   = st.valid;
+    const used      = st.usage?.used ?? 0;
+    const limit     = st.limits?.requests_per_month ?? -1;
+    const pct       = limit > 0 ? Math.min(100, Math.round(used / limit * 100)) : 0;
+    const barColor  = pct >= 90 ? "#f87171" : pct >= 70 ? "#fbbf24" : "#4ade80";
+    const expiresAt = st.expires_at
+      ? new Date(st.expires_at).toLocaleDateString("ru")
+      : null;
+
+    statusCard = `
+<div class="card" style="margin-bottom:20px">
+  <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap">
+    <div>
+      <div style="font-size:11px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--text3);margin-bottom:8px">Текущая лицензия</div>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
+        <span class="lic-status ${isDev?"lic-dev":isValid?"lic-active":"lic-revoked"}">
+          ${isDev ? "Dev-режим" : isValid ? "Активна" : "Недействительна"}
+        </span>
+        ${st.plan && !isDev ? `<span style="font-family:var(--mono);font-size:13px;font-weight:600">${esc(st.plan)}</span>` : ""}
+        ${st.customer ? `<span style="font-size:12px;color:var(--text2)">${esc(st.customer)}</span>` : ""}
+      </div>
+      ${st.keyMasked && !isDev ? `<div style="font-family:var(--mono);font-size:11px;color:var(--text3)">${esc(st.keyMasked)}</div>` : ""}
+      ${expiresAt ? `<div style="font-size:11px;color:var(--text2);margin-top:4px">Действует до: ${expiresAt}</div>` : ""}
+      ${!isValid && st.reason ? `<div class="alert-red" style="margin-top:8px;font-size:12px">${esc(st.reason)}</div>` : ""}
     </div>
-    <div class="plans-grid">
-      ${S.plans.length ? S.plans.map(p => `
-      <div class="plan-card">
-        <div class="plan-hd">
-          <div>
-            <div class="plan-name">${esc(p.display_name||p.name)}</div>
-            <div class="plan-slug">${esc(p.name)}</div>
-          </div>
-          <button class="icon-btn" data-edit-plan="${esc(p.name)}" title="Редактировать">✏</button>
-        </div>
-        <div class="plan-stats">
-          <div class="plan-stat"><div class="plan-val">${inf(p.max_devices)}</div><div class="plan-lbl">устройств</div></div>
-          <div class="plan-stat"><div class="plan-val">${inf(p.requests_per_month)}</div><div class="plan-lbl">запросов/мес</div></div>
-        </div>
-        ${p.description ? `<div class="plan-desc">${esc(p.description)}</div>` : ""}
-      </div>`).join("") : `<div class="empty" style="padding:20px">Планы не загружены</div>`}
-    </div>
+    ${!isDev ? `
+    <div style="min-width:200px">
+      <div style="font-size:11px;color:var(--text2);margin-bottom:6px">Использование (${st.usage?.month||"—"})</div>
+      <div class="sgrid" style="grid-template-columns:1fr 1fr">
+        <div class="sbox"><div class="sval">${inf(st.limits?.max_devices)}</div><div class="slbl">устройств</div></div>
+        <div class="sbox"><div class="sval" style="font-size:14px">${used}/${inf(limit)}</div><div class="slbl">запросов</div></div>
+      </div>
+      ${limit > 0 ? `
+      <div class="lic-bar-track" style="margin-top:10px">
+        <div class="lic-bar-fill" style="width:${pct}%;background:${barColor}"></div>
+      </div>` : ""}
+    </div>` : ""}
   </div>
-
-  <!-- Licenses section -->
-  <div>
-    <div style="font-size:13px;font-weight:600;color:var(--text2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:12px">Выданные лицензии</div>
-    ${S.licenses.length ? `
-    <div class="lic-table-wrap">
-      <table class="lic-table">
-        <thead><tr>
-          <th>Ключ</th><th>Клиент</th><th>План</th><th>Устройства</th><th>Использование</th><th>Статус</th><th></th>
-        </tr></thead>
-        <tbody>
-          ${S.licenses.map(l => {
-            const used  = l.used_this_month || 0;
-            const limit = l.requests_per_month;
-            const pct   = limit > 0 ? Math.min(100, Math.round(used/limit*100)) : 0;
-            const active = l.is_active;
-            return `
-          <tr class="${active?"":"lic-inactive"}">
-            <td><code>${esc(l.key.slice(0,18))}…</code></td>
-            <td>${esc(l.customer||"—")}</td>
-            <td>
-              <select class="lic-plan-sel" data-lic-key="${esc(l.key)}" style="width:auto;padding:4px 8px;font-size:12px">
-                ${S.plans.map(p=>`<option value="${esc(p.name)}" ${p.name===l.plan?"selected":""}>${esc(p.display_name||p.name)}</option>`).join("")}
-              </select>
-            </td>
-            <td style="font-family:var(--mono);font-size:12px">${l.active_devices||0} / ${inf(l.max_devices)}</td>
-            <td>
-              <div style="display:flex;align-items:center;gap:8px;min-width:120px">
-                <div class="lic-bar-track"><div class="lic-bar-fill" style="width:${pct}%;background:${pct>=90?'#f87171':pct>=70?'#fbbf24':'#4ade80'}"></div></div>
-                <span style="font-family:var(--mono);font-size:11px;white-space:nowrap">${used}/${limit<0?"∞":limit}</span>
-              </div>
-            </td>
-            <td><span class="lic-status ${active?"lic-active":"lic-revoked"}">${active?"Активна":"Отозвана"}</span></td>
-            <td>
-              ${active
-                ? `<button class="icon-btn icon-btn-red" data-revoke-lic="${esc(l.key)}" title="Отозвать">✕</button>`
-                : `<span style="font-size:11px;color:var(--text3)">—</span>`}
-            </td>
-          </tr>`;
-          }).join("")}
-        </tbody>
-      </table>
-    </div>` : `<div class="empty" style="padding:30px">Лицензии не выданы</div>`}
-  </div>
-</div>
-
-${licenseModals()}`;
-}
-
-function licenseModals() {
-  if (!S.modal) return "";
-  const inf = v => (v===-1||v==="-1"||v===-"1") ? -1 : v;
-  const planOpts = S.plans.map(p =>
-    `<option value="${esc(p.name)}" ${p.name===S.issueForm?.plan?"selected":""}>${esc(p.display_name||p.name)}</option>`).join("");
-
-  if (S.modal === "issue-license") return `
-<div class="overlay"><div class="modal">
-  <div class="modal-header"><h2>Выдать лицензию</h2><button class="modal-close" id="modal-close">✕</button></div>
-  ${S.licError?`<div class="alert-red" style="margin-bottom:14px">${esc(S.licError)}</div>`:""}
-  <label>Клиент / компания</label>
-  <input id="lic-customer" type="text" placeholder="ООО Ромашка" value="${esc(S.issueForm.customer)}"/>
-  <label>Тарифный план</label>
-  <select id="lic-plan">${planOpts}</select>
-  <div class="mrow" style="margin-top:20px">
-    <button class="btn-ghost" id="modal-close">Отмена</button>
-    <button class="btn-primary" id="btn-confirm-issue">${S.formBusy?`<span class="spinner"></span>`:"Выдать"}</button>
-  </div>
-</div></div>`;
-
-  if (S.modal === "edit-plan" && S.editingPlan) {
-    const p = S.editingPlan;
-    return `
-<div class="overlay"><div class="modal">
-  <div class="modal-header"><h2>Редактировать план</h2><button class="modal-close" id="modal-close">✕</button></div>
-  ${S.licError?`<div class="alert-red" style="margin-bottom:14px">${esc(S.licError)}</div>`:""}
-  <label>Название</label>
-  <input id="ep-display" type="text" value="${esc(p.display_name||"")}"/>
-  <label>Устройств <small style="color:var(--text3)">(-1 = без ограничений)</small></label>
-  <input id="ep-devices" type="number" value="${p.max_devices}"/>
-  <label>Запросов в месяц <small style="color:var(--text3)">(-1 = без ограничений)</small></label>
-  <input id="ep-requests" type="number" value="${p.requests_per_month}"/>
-  <label>Описание</label>
-  <input id="ep-desc" type="text" value="${esc(p.description||"")}"/>
-  <div class="mrow" style="margin-top:20px">
-    <button class="btn-ghost" id="modal-close">Отмена</button>
-    <button class="btn-primary" id="btn-confirm-edit-plan">${S.formBusy?`<span class="spinner"></span>`:"Сохранить"}</button>
-  </div>
-</div></div>`;
+</div>`;
   }
 
-  if (S.modal === "add-plan") return `
-<div class="overlay"><div class="modal">
-  <div class="modal-header"><h2>Новый план</h2><button class="modal-close" id="modal-close">✕</button></div>
-  ${S.licError?`<div class="alert-red" style="margin-bottom:14px">${esc(S.licError)}</div>`:""}
-  <label>Идентификатор <small style="color:var(--text3)">(латиница, без пробелов)</small></label>
-  <input id="np-name" type="text" placeholder="starter" value="${esc(S.addPlanForm.name)}"/>
-  <label>Отображаемое название</label>
-  <input id="np-display" type="text" placeholder="Стартовый" value="${esc(S.addPlanForm.display_name)}"/>
-  <label>Устройств <small style="color:var(--text3)">(-1 = без ограничений)</small></label>
-  <input id="np-devices" type="number" value="${S.addPlanForm.max_devices}"/>
-  <label>Запросов в месяц <small style="color:var(--text3)">(-1 = без ограничений)</small></label>
-  <input id="np-requests" type="number" value="${S.addPlanForm.requests_per_month}"/>
-  <label>Описание</label>
-  <input id="np-desc" type="text" value="${esc(S.addPlanForm.description)}"/>
-  <div class="mrow" style="margin-top:20px">
-    <button class="btn-ghost" id="modal-close">Отмена</button>
-    <button class="btn-primary" id="btn-confirm-add-plan">${S.formBusy?`<span class="spinner"></span>`:"Создать"}</button>
-  </div>
-</div></div>`;
+  return `
+<div style="max-width:560px">
+  ${statusCard}
 
-  return "";
+  <div class="card">
+    <div class="ctitle">Активировать лицензию</div>
+    <div style="font-size:12px;color:var(--text2);margin-bottom:16px;line-height:1.6">
+      Введите лицензионный ключ, полученный от поставщика системы.
+      После активации ключ сохраняется в базе данных и применяется автоматически.
+    </div>
+    ${S.licError   ? `<div class="alert-red"   style="margin-bottom:12px">${esc(S.licError)}</div>`   : ""}
+    ${S.licSuccess ? `<div class="alert-green" style="margin-bottom:12px">${esc(S.licSuccess)}</div>` : ""}
+    <label>Лицензионный ключ</label>
+    <input id="lic-key-input" type="text" placeholder="SALES-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX"
+      value="${esc(S.activateKey)}" style="font-family:var(--mono);font-size:12px"/>
+    <button class="btn-primary btn-full" id="btn-activate-license" style="margin-top:14px">
+      ${S.licBusy ? `<span class="spinner"></span> Проверяю…` : "Активировать"}
+    </button>
+  </div>
+</div>`;
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -627,7 +546,7 @@ function bind() {
   });
   document.getElementById("nav-licenses")?.addEventListener("click", () => {
     S.page="licenses"; S.selected=null; S.mgrCalls=[]; render();
-    loadLicenses();
+    loadLicenseStatus();
   });
   document.getElementById("btn-back")?.addEventListener("click", () => {
     S.selected=null; S.mgrCalls=[]; S.activeAudioCallId=null; render();
@@ -718,81 +637,18 @@ function bind() {
   );
 
   // ── Licenses page ─────────────────────────────────────────
-  document.getElementById("btn-issue-license")?.addEventListener("click", () => {
-    S.issueForm = { customer:"", plan: S.plans[0]?.name || "basic" };
-    S.licError=""; S.modal="issue-license"; render();
-  });
+  document.getElementById("lic-key-input")?.addEventListener("input", e => { S.activateKey = e.target.value; });
 
-  document.getElementById("btn-confirm-issue")?.addEventListener("click", async () => {
-    const customer = document.getElementById("lic-customer")?.value.trim()||"";
-    const plan     = document.getElementById("lic-plan")?.value||"basic";
-    S.formBusy=true; S.licError=""; render();
-    const res = await window.api.post("/api/licenses/issue", { customer, plan });
-    S.formBusy=false;
-    if (res?.error) { S.licError=res.error; render(); return; }
-    S.modal=null; await loadLicenses();
-    alert(`Лицензия выдана:\n${res.license?.key}`);
-  });
-
-  document.getElementById("btn-add-plan")?.addEventListener("click", () => {
-    S.addPlanForm={ name:"", display_name:"", max_devices:1, requests_per_month:100, description:"" };
-    S.licError=""; S.modal="add-plan"; render();
-  });
-
-  document.getElementById("btn-confirm-add-plan")?.addEventListener("click", async () => {
-    const name     = document.getElementById("np-name")?.value.trim()||"";
-    const display  = document.getElementById("np-display")?.value.trim()||"";
-    const devices  = parseInt(document.getElementById("np-devices")?.value)||1;
-    const requests = parseInt(document.getElementById("np-requests")?.value)||100;
-    const desc     = document.getElementById("np-desc")?.value.trim()||"";
-    if (!name) { S.licError="Введите идентификатор плана"; render(); return; }
-    S.formBusy=true; S.licError=""; render();
-    const res = await window.api.post("/api/plans", { name, display_name:display, max_devices:devices, requests_per_month:requests, description:desc });
-    S.formBusy=false;
-    if (res?.error) { S.licError=res.error; render(); return; }
-    S.modal=null; await loadLicenses();
-  });
-
-  document.querySelectorAll("[data-edit-plan]").forEach(btn => {
-    btn.addEventListener("click", () => {
-      const p = S.plans.find(x=>x.name===btn.dataset.editPlan);
-      if (!p) return;
-      S.editingPlan = { ...p };
-      S.licError=""; S.modal="edit-plan"; render();
-    });
-  });
-
-  document.getElementById("btn-confirm-edit-plan")?.addEventListener("click", async () => {
-    const display  = document.getElementById("ep-display")?.value.trim()||"";
-    const devices  = parseInt(document.getElementById("ep-devices")?.value);
-    const requests = parseInt(document.getElementById("ep-requests")?.value);
-    const desc     = document.getElementById("ep-desc")?.value.trim()||"";
-    S.formBusy=true; S.licError=""; render();
-    const res = await window.api.put(`/api/plans/${S.editingPlan.name}`, { display_name:display, max_devices:devices, requests_per_month:requests, description:desc });
-    S.formBusy=false;
-    if (res?.error) { S.licError=res.error; render(); return; }
-    S.modal=null; await loadLicenses();
-  });
-
-  // Change plan via dropdown
-  document.querySelectorAll(".lic-plan-sel").forEach(sel => {
-    sel.addEventListener("change", async () => {
-      const key  = sel.dataset.licKey;
-      const plan = sel.value;
-      const res  = await window.api.put(`/api/licenses/${key}`, { plan });
-      if (res?.error) { alert(res.error); return; }
-      await loadLicenses();
-    });
-  });
-
-  // Revoke license
-  document.querySelectorAll("[data-revoke-lic]").forEach(btn => {
-    btn.addEventListener("click", async () => {
-      if (!confirm("Отозвать лицензию?")) return;
-      const res = await window.api.delete(`/api/licenses/${btn.dataset.revokeLic}`);
-      if (res?.error) { alert(res.error); return; }
-      await loadLicenses();
-    });
+  document.getElementById("btn-activate-license")?.addEventListener("click", async () => {
+    const key = (document.getElementById("lic-key-input")?.value || S.activateKey).trim();
+    if (!key) { S.licError = "Введите лицензионный ключ"; render(); return; }
+    S.licBusy = true; S.licError = ""; S.licSuccess = ""; render();
+    const res = await window.api.post("/api/license/activate", { key });
+    S.licBusy = false;
+    if (res?.error) { S.licError = res.error; render(); return; }
+    S.activateKey = "";
+    S.licSuccess = `Лицензия активирована — план: ${res.plan || "—"}`;
+    await loadLicenseStatus();
   });
 
   // Play audio
@@ -1109,6 +965,7 @@ code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:2
 .lic-status{font-size:11px;font-weight:600;padding:3px 9px;border-radius:20px;font-family:var(--mono)}
 .lic-active{background:rgba(34,197,94,.12);color:#4ade80}
 .lic-revoked{background:rgba(239,68,68,.12);color:#f87171}
+.lic-dev{background:rgba(99,102,241,.12);color:#a5b4fc}
 .lic-bar-track{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;min-width:60px}
 .lic-bar-fill{height:100%;border-radius:3px;transition:width .4s}
 
