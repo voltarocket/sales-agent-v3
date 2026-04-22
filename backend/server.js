@@ -224,6 +224,33 @@ async function processSession(session, duration) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// ADMIN PROXY — license & plan management → global backend
+// ═══════════════════════════════════════════════════════════
+async function adminProxy(path, method = "GET", body = null) {
+  const headers = {
+    "Content-Type": "application/json",
+    "x-admin-secret": process.env.GLOBAL_ADMIN_SECRET || "",
+  };
+  const opts = { method, headers, timeout: 10000 };
+  if (body) opts.body = JSON.stringify(body);
+  const r = await fetch(`${GLOBAL_URL}${path}`, opts);
+  return r.json();
+}
+
+// Plans
+app.get("/api/plans",          async (_, res) => res.json(await adminProxy("/plans")));
+app.post("/api/plans",         async (req, res) => res.json(await adminProxy("/plans", "POST", req.body)));
+app.put("/api/plans/:name",    async (req, res) => res.json(await adminProxy(`/plans/${req.params.name}`, "PUT", req.body)));
+app.delete("/api/plans/:name", async (req, res) => res.json(await adminProxy(`/plans/${req.params.name}`, "DELETE")));
+
+// Licenses
+app.get("/api/licenses",            async (_, res) => res.json(await adminProxy("/licenses")));
+app.post("/api/licenses/issue",     async (req, res) => res.json(await adminProxy("/licenses/issue", "POST", req.body)));
+app.put("/api/licenses/:key",       async (req, res) => res.json(await adminProxy(`/licenses/${req.params.key}`, "PATCH", req.body)));
+app.delete("/api/licenses/:key",    async (req, res) => res.json(await adminProxy(`/licenses/${req.params.key}`, "DELETE")));
+app.get("/api/licenses/:key/status", async (req, res) => res.json(await adminProxy(`/licenses/${req.params.key}/status`)));
+
+// ═══════════════════════════════════════════════════════════
 // JOB STATUS
 // ═══════════════════════════════════════════════════════════
 app.get("/api/jobs/:jobId", async (req, res) => {

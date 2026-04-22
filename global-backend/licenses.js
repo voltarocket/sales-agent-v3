@@ -18,8 +18,64 @@ const PLANS = {
   enterprise: { max_devices: -1, requests_per_month: -1   }, // unlimited
 };
 
+// ─── Plan management ───────────────────────────────────────
+export async function getPlans() {
+  const { rows } = await pool.query("SELECT * FROM license_plans ORDER BY requests_per_month");
+  return rows;
+}
+
+export async function createPlan({ name, display_name = "", max_devices = 1, requests_per_month = 100, description = "" }) {
+  if (!name) throw new Error("name required");
+  const { rows: [plan] } = await pool.query(
+    `INSERT INTO license_plans (name, display_name, max_devices, requests_per_month, description)
+     VALUES ($1,$2,$3,$4,$5) RETURNING *`,
+    [name.toLowerCase(), display_name, max_devices, requests_per_month, description]
+  );
+  return plan;
+}
+
+export async function updatePlan(name, fields) {
+  const allowed = ["display_name", "max_devices", "requests_per_month", "description"];
+  const parts = []; const vals = []; let idx = 1;
+  for (const [k, v] of Object.entries(fields)) {
+    if (!allowed.includes(k)) continue;
+    parts.push(`${k}=$${idx++}`); vals.push(v);
+  }
+  if (!parts.length) throw new Error("No valid fields");
+  vals.push(name);
+  const { rows: [plan] } = await pool.query(
+    `UPDATE license_plans SET ${parts.join(", ")} WHERE name=$${idx} RETURNING *`, vals
+  );
+  if (!plan) throw new Error("Plan not found");
+  return plan;
+}
+
+export async function deletePlan(name) {
+  await pool.query("DELETE FROM license_plans WHERE name=$1", [name]);
+}
+
+// ─── License listing (admin) ───────────────────────────────
+export async function listLicenses() {
+  const month = new Date().toISOString().slice(0, 7);
+  const { rows } = await pool.query(`
+    SELECT l.*,
+           COALESCE(lu.requests, 0) AS used_this_month,
+           COUNT(DISTINCT ld.device_id)::int AS active_devices
+    FROM licenses l
+    LEFT JOIN license_usage  lu ON lu.license_key = l.key AND lu.month = $1
+    LEFT JOIN license_devices ld ON ld.license_key = l.key
+    GROUP BY l.key, lu.requests
+    ORDER BY l.created_at DESC`, [month]);
+  return rows;
+}
+
+// ─── Issue ─────────────────────────────────────────────────
 export async function issueLicense({ customer = "", plan = "basic", expires_at = null } = {}) {
-  const limits = PLANS[plan] || PLANS.basic;
+  // Fetch limits from DB, fall back to hardcoded defaults
+  const { rows: [dbPlan] } = await pool.query(
+    "SELECT * FROM license_plans WHERE name=$1", [plan]
+  ).catch(() => ({ rows: [] }));
+  const limits = dbPlan || PLANS[plan] || PLANS.basic;
   const key = "SALES-" + crypto.randomBytes(16).toString("hex").toUpperCase();
 
   const { rows: [license] } = await pool.query(

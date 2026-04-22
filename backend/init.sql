@@ -48,6 +48,20 @@ CREATE TABLE IF NOT EXISTS settings (
 );
 
 -- ─── Licensing ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS license_plans (
+  name                VARCHAR(50)  PRIMARY KEY,
+  display_name        VARCHAR(100) DEFAULT '',
+  max_devices         INTEGER      DEFAULT 1,   -- -1 = unlimited
+  requests_per_month  INTEGER      DEFAULT 100, -- -1 = unlimited
+  description         TEXT         DEFAULT ''
+);
+
+INSERT INTO license_plans (name, display_name, max_devices, requests_per_month, description) VALUES
+  ('basic',      'Базовый',        1,  100,  'Для одного устройства, до 100 запросов в месяц'),
+  ('pro',        'Профессиональный', 5, 1000, 'До 5 устройств, до 1000 запросов в месяц'),
+  ('enterprise', 'Корпоративный',  -1, -1,   'Неограниченные устройства и запросы')
+ON CONFLICT DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS licenses (
   key                 VARCHAR(64)  PRIMARY KEY,
   customer            VARCHAR(255) DEFAULT '',

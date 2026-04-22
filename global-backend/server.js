@@ -12,6 +12,7 @@ import dotenv from "dotenv";
 import {
   issueLicense, validateLicense, recordUsage,
   revokeLicense, updateLicense, getLicenseStatus, waitForDb,
+  getPlans, createPlan, updatePlan, deletePlan, listLicenses,
 } from "./licenses.js";
 
 dotenv.config();
@@ -310,6 +311,31 @@ app.post("/analyze", licenseGuard, async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // LICENSE MANAGEMENT ROUTES
 // ═══════════════════════════════════════════════════════════
+
+// ─── Plan management (admin only) ─────────────────────────
+app.get("/plans", adminOnly, async (_, res) => {
+  try { res.json(await getPlans()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post("/plans", adminOnly, async (req, res) => {
+  try { res.json({ ok: true, plan: await createPlan(req.body) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.put("/plans/:name", adminOnly, async (req, res) => {
+  try { res.json({ ok: true, plan: await updatePlan(req.params.name, req.body) }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.delete("/plans/:name", adminOnly, async (req, res) => {
+  try { await deletePlan(req.params.name); res.json({ ok: true }); }
+  catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ─── List all licenses (admin) ─────────────────────────────
+app.get("/licenses", adminOnly, async (_, res) => {
+  try { res.json(await listLicenses()); } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 // Issue a new license key (admin only)
 app.post("/licenses/issue", adminOnly, async (req, res) => {

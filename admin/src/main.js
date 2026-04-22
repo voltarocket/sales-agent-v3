@@ -276,6 +276,7 @@ function apiCall(endpoint, method = "GET", body = null) {
 ipcMain.handle("api-get",       (_, ep)      => apiCall(ep, "GET"));
 ipcMain.handle("api-post",      (_, ep, body) => apiCall(ep, "POST", body));
 ipcMain.handle("api-put",       (_, ep, body) => apiCall(ep, "PUT", body));
+ipcMain.handle("api-patch",     (_, ep, body) => apiCall(ep, "PATCH", body));
 ipcMain.handle("api-delete",    (_, ep)       => apiCall(ep, "DELETE"));
 ipcMain.handle("api-set-token", (_, token)    => { adminToken = token; return { ok: true }; });
 

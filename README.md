@@ -1,243 +1,275 @@
-# Sales Call Analyzer
+# Sales Call Analyzer v3
 
 Система анализа звонков менеджеров по продажам.
-Телефон пишет разговор → сервер транскрибирует и анализирует → десктоп показывает результаты.
+Телефон пишет разговор → локальный бэкенд ставит задачу → глобальный бэкенд транскрибирует и анализирует через ИИ → десктоп показывает результаты.
 
 ---
 
-## Структура
+## Архитектура
+
+```
+Desktop / Admin (Electron)
+        │ REST + WebSocket
+        ▼
+┌─────────────────────────────────┐
+│  LOCAL BACKEND  :3001           │
+│  Бизнес-логика + PostgreSQL     │
+│  Менеджеры, звонки, контакты    │
+│  Redis — очередь задач + кэш    │
+│  Проверка лицензии              │
+└────────────┬────────────────────┘
+             │ HTTP (audio + text)
+             ▼
+┌─────────────────────────────────┐
+│  GLOBAL BACKEND  :3002          │
+│  AI-шлюз: Groq Whisper + LLaMA  │
+│  Лицензирование (выдача ключей) │
+│  Управление тарифными планами   │
+└─────────────────────────────────┘
+             │
+     ┌───────┴───────┐
+     ▼               ▼
+ PostgreSQL :5432   Redis :6379
+```
+
+---
+
+## Структура проекта
 
 ```
 sales-agent-v3/
-├── backend/       ← Node.js API + WebSocket сервер
-│   ├── server.js
-│   ├── package.json
+├── backend/              ← Локальный бэкенд (Node.js + Express)
+│   ├── server.js         ← API + WebSocket + прокси к global-backend
+│   ├── db.js             ← PostgreSQL пул
+│   ├── redis.js          ← ioredis + статусы задач
+│   ├── license.js        ← Валидация лицензии, кэш, rate limit
+│   ├── init.sql          ← Схема БД (авто-применяется в Docker)
 │   └── .env.example
-├── desktop/       ← Electron приложение (дашборд руководителя)
-│   ├── src/
-│   │   ├── main.js      ← Electron main process
-│   │   ├── preload.js   ← IPC bridge
-│   │   ├── index.html   ← Shell
-│   │   └── renderer.js  ← Весь UI
-│   └── package.json
-├── android/       ← Kotlin Android приложение (телефон менеджера)
-└── package.json
+├── global-backend/       ← Глобальный бэкенд (Node.js + Express)
+│   ├── server.js         ← /process, /analyze, /plans, /licenses
+│   ├── licenses.js       ← Операции с лицензиями и планами (PostgreSQL)
+│   └── .env.example
+├── desktop/              ← Electron (дашборд менеджера)
+├── admin/                ← Electron (панель администратора)
+│   └── src/
+│       ├── main.js       ← IPC + локальная БД
+│       ├── renderer.js   ← Весь UI (менеджеры, лицензии, настройки)
+│       └── preload.js    ← IPC bridge
+├── android/              ← Kotlin (запись звонков с телефона)
+├── docker-compose.yml    ← Поднимает все 4 сервиса
+└── package.json          ← Скрипты для разработки
 ```
 
 ---
 
-## Что нужно установить
+## Быстрый старт (Docker)
 
-### Node.js
+### 1. Зависимости
 
-Скачай и установи с официального сайта: https://nodejs.org
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+- [Node.js LTS](https://nodejs.org) (для Electron-приложений)
+- [ffmpeg](https://ffmpeg.org/download.html) (для локальной разработки без Docker)
 
-Выбирай версию **LTS** (Long Term Support). После установки проверь в терминале:
+### 2. Настройка .env файлов
 
 ```bash
-node -v
-npm -v
+# Глобальный бэкенд — AI-ключи
+cp global-backend/.env.example global-backend/.env
+notepad global-backend/.env   # вставь GROQ_API_KEY и ADMIN_SECRET
+
+# Локальный бэкенд
+cp backend/.env.example backend/.env
+notepad backend/.env          # вставь GLOBAL_ADMIN_SECRET (= ADMIN_SECRET выше)
 ```
 
-Должны вывести версии, например `v20.11.0` и `10.2.4`.
+Минимально необходимые переменные:
 
-### Git + Git Bash
+| Файл | Переменная | Значение |
+|------|-----------|----------|
+| `global-backend/.env` | `GROQ_API_KEY` | Ключ с [console.groq.com](https://console.groq.com) |
+| `global-backend/.env` | `ADMIN_SECRET` | Любая строка-пароль для администратора |
+| `backend/.env` | `GLOBAL_ADMIN_SECRET` | Та же строка, что `ADMIN_SECRET` выше |
 
-Скачай и установи Git for Windows: https://git-scm.com/download/win
-
-При установке оставь все настройки по умолчанию. Установится вместе с **Git Bash** — терминал который используется для всех команд в этом проекте.
-
-После установки найди **Git Bash** в меню Пуск и запускай его вместо обычного cmd.
-
-### ffmpeg
-
-ffmpeg нужен бэкенду для обработки аудио.
-
-**Способ 1 — через winget (рекомендуется):**
+### 3. Запуск
 
 ```bash
-winget install ffmpeg
+npm run docker:up
 ```
 
-**Способ 2 — вручную:**
+Это поднимет: PostgreSQL, Redis, Global Backend, Local Backend.
 
-1. Скачай с https://ffmpeg.org/download.html → Windows → gyan.dev → `ffmpeg-release-essentials.zip`
-2. Распакуй, например, в `C:\ffmpeg`
-3. Добавь `C:\ffmpeg\bin` в системную переменную `PATH`
-
-Проверь:
+### 4. Electron-приложения (отдельно)
 
 ```bash
-ffmpeg -version
-```
-
-### Android Studio _(только для работы с Android приложением)_
-
-Скачай и установи с официального сайта: https://developer.android.com/studio
-
-При первом запуске установщик Android Studio автоматически скачает:
-- Android SDK
-- Android Emulator
-- Build Tools
-
-Это займёт 5–15 минут. После завершения можно открывать проект.
-
----
-
-## Установка зависимостей
-
-Открой Git Bash, перейди в папку проекта и выполни:
-
-```bash
-cd ~/Downloads/sales-agent-v3
-cd backend && npm install
-cd ../desktop && npm install
-cd ..
+npm run install:all    # установить зависимости
+npm run dev:desktop    # дашборд менеджера
+npm run dev:admin      # панель администратора
 ```
 
 ---
 
-## Файл .env
+## Разработка без Docker
 
-Создай файл `backend/.env` со следующим содержимым:
-
-```
-GROQ_API_KEY=gsk_твой_ключ_с_console.groq.com
-PORT=3001
-```
-
-Через Git Bash:
+Требуется локально: Node.js, PostgreSQL, Redis, ffmpeg.
 
 ```bash
-notepad backend/.env
-```
+# Запустить всё сразу
+npm run dev:all
 
-Получить ключ: https://console.groq.com → API Keys → Create API Key
-
----
-
-## Запуск (два отдельных терминала)
-
-### Терминал 1 — Бэкенд
-
-```bash
-cd ~/Downloads/sales-agent-v3/backend
-npm run dev
-```
-
-Ожидаемый вывод:
-
-```
-🚀  http://localhost:3001
-    STT    : groq
-    LLM    : groq
-    ffmpeg : ✓
-    DB     : sales.json
-```
-
-### Терминал 2 — Десктоп (Electron)
-
-Открой новое окно Git Bash и запусти:
-
-```bash
-cd ~/Downloads/sales-agent-v3/desktop
-npm start
-```
-
-Откроется окно приложения с вкладками: Звонок, Контакты, История, Менеджеры, Аналитика.
-
----
-
-## Как работает система
-
-```
-Менеджер звонит с телефона (Android)
-    ↓
-Android приложение пишет оба голоса автоматически
-    ↓
-Стримит аудио на бэкенд по Wi-Fi (WebSocket)
-    ↓
-Бэкенд: Groq Whisper → транскрипт → LLaMA → анализ
-    ↓
-На телефоне: "Сохранить клиента?" → Да/Нет
-    ↓
-Руководитель видит результат в Electron на компьютере
+# Или по отдельности:
+npm run dev:global    # global-backend :3002
+npm run dev:local     # local-backend  :3001
+npm run dev:desktop   # Electron менеджер
+npm run dev:admin     # Electron администратор
 ```
 
 ---
 
-## Android — запуск в Android Studio
+## Лицензирование
 
-### Шаг 1 — Открыть проект
+### Как работает
 
-```
-Android Studio → File → Open →
-выбери папку: sales-agent-v3/android
-```
+1. **Глобальный бэкенд** выдаёт лицензионные ключи и хранит тарифные планы в PostgreSQL.
+2. **Локальный бэкенд** при старте валидирует ключ (результат кэшируется в Redis на 1 час).
+3. Перед каждым AI-вызовом проверяется счётчик использования в Redis.
+4. После успешного анализа — счётчик инкрементируется и асинхронно отправляется в global-backend.
 
-Дождись Gradle sync (5–10 минут первый раз).
+### Тарифные планы (по умолчанию)
 
-### Шаг 2 — Создать эмулятор
+| План | Устройств | Запросов/мес |
+|------|-----------|-------------|
+| `basic` | 1 | 100 |
+| `pro` | 5 | 1 000 |
+| `enterprise` | ∞ | ∞ |
 
-```
-Tools → Device Manager → Create Device →
-Pixel 7 → Android 14 → Finish
-```
+Планы хранятся в базе данных и редактируются через **Admin Panel → Лицензии → Тарифные планы**.
 
-Нажми ▶ чтобы запустить эмулятор.
+### Выдать лицензию через Admin Panel
 
-### Шаг 3 — Запустить приложение
+1. Открой Admin Panel
+2. Войди (по умолчанию: `admin` / `admin`)
+3. Перейди в раздел **Лицензии**
+4. Нажми **+ Выдать лицензию**, выбери клиента и план
+5. Скопируй выданный ключ и добавь в `backend/.env`:
 
-Нажми зелёную кнопку **▶ Run** вверху (Shift+F10).
-
-Приложение установится на эмулятор.
-
-### Шаг 4 — Установить как телефон по умолчанию
-
-В приложении нажми **"Настроить"** на экране дайлера, либо открой вкладку **Настройки** → **Установить как телефон по умолчанию**.
-
-Также в системных настройках эмулятора:
-
-```
-Settings → Apps → Default Apps → Phone App → Sales Analyzer
+```env
+LICENSE_KEY=SALES-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+DEVICE_ID=my-server-1   # опционально, иначе auto
 ```
 
-### Шаг 5 — Указать адрес бэкенда
+### Выдать лицензию через API
 
-В приложении открой вкладку **Настройки** и введи IP-адрес компьютера с бэкендом:
+```bash
+curl -X POST http://localhost:3002/licenses/issue \
+  -H "X-Admin-Secret: your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{ "customer": "ООО Ромашка", "plan": "pro" }'
+```
+
+### Изменить план лицензии
+
+Через Admin Panel: раздел **Лицензии** → выпадающий список в строке лицензии.
+
+Или через API:
+
+```bash
+curl -X PATCH http://localhost:3002/licenses/SALES-XXXX... \
+  -H "X-Admin-Secret: your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{ "plan": "enterprise" }'
+```
+
+### Изменить условия плана
+
+Через Admin Panel: **Лицензии → Тарифные планы → ✏ (редактировать)**.
+
+Или через API:
+
+```bash
+curl -X PUT http://localhost:3002/plans/pro \
+  -H "X-Admin-Secret: your-secret" \
+  -H "Content-Type: application/json" \
+  -d '{ "max_devices": 10, "requests_per_month": 2000 }'
+```
+
+### Dev-режим (без лицензии)
+
+Если `LICENSE_KEY` не задан в `backend/.env` — все AI-запросы работают без ограничений.
+
+---
+
+## Android
+
+### Запуск в Android Studio
+
+1. `File → Open → sales-agent-v3/android`
+2. Дождись Gradle sync (5–10 мин первый раз)
+3. Создай эмулятор: `Tools → Device Manager → Create Device → Pixel 7 → Android 14`
+4. Нажми ▶ Run
+
+### Подключение к бэкенду
+
+В приложении: вкладка **Настройки** → адрес бэкенда:
 
 ```
 ws://192.168.1.XXX:3001
 ```
 
-Узнать IP компьютера (в cmd или Git Bash):
+Узнать IP компьютера:
 
 ```bash
-ipconfig
+ipconfig    # Windows
 ```
 
-Смотри строку `IPv4 Address`. Телефон и компьютер должны быть в одной Wi-Fi сети.
-
-### Шаг 6 — Тестовый звонок
-
-Открой вкладку **Звонок** в приложении, наберите номер и нажмите 📞.
-
-Или в эмуляторе: `...` (Extended Controls) → вкладка **Phone** → **Call Device**.
-
-После завершения звонка появится экран с анализом и вопросом "Сохранить клиента?".
-
-### Установка на реальный телефон
-
-1. На телефоне: Настройки → О телефоне → нажми 7 раз на "Номер сборки"
-2. Настройки → Для разработчиков → USB-отладка → включить
-3. Подключи телефон кабелем к компьютеру → подтверди на телефоне
-4. В Android Studio выбери телефон вместо эмулятора → нажми ▶ Run
+Телефон и компьютер должны быть в одной Wi-Fi сети.
 
 ---
 
-## Groq лимиты (бесплатно)
+## API Reference
 
-| Сервис                 | Лимит в день      |
-| ---------------------- | ----------------- |
-| Транскрипция (Whisper) | 7 200 минут аудио |
-| Анализ (LLaMA 70b)     | 14 400 запросов   |
+### Local Backend (:3001)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| GET | `/api/health` | Статус всех компонентов |
+| GET | `/api/license/status` | Текущий статус лицензии |
+| GET/POST | `/api/calls` | Звонки |
+| GET/POST/PUT/DELETE | `/api/contacts` | Контакты |
+| GET/POST/PUT/DELETE | `/api/managers` | Менеджеры |
+| GET/PUT | `/api/settings` | Настройки |
+| POST | `/api/notify` | Telegram уведомление |
+| GET | `/api/plans` | Список тарифных планов |
+| POST | `/api/plans` | Создать план |
+| PUT | `/api/plans/:name` | Изменить план |
+| GET | `/api/licenses` | Список лицензий |
+| POST | `/api/licenses/issue` | Выдать лицензию |
+| PUT | `/api/licenses/:key` | Изменить план лицензии |
+| DELETE | `/api/licenses/:key` | Отозвать лицензию |
+
+### Global Backend (:3002)
+
+| Метод | Путь | Доступ | Описание |
+|-------|------|--------|----------|
+| GET | `/health` | Public | Статус сервиса |
+| POST | `/process` | License | Аудио → транскрипт + анализ |
+| POST | `/analyze` | License | Текст → анализ |
+| GET | `/plans` | Admin | Список планов |
+| POST | `/plans` | Admin | Создать план |
+| PUT | `/plans/:name` | Admin | Изменить план |
+| DELETE | `/plans/:name` | Admin | Удалить план |
+| GET | `/licenses` | Admin | Список лицензий |
+| POST | `/licenses/issue` | Admin | Выдать лицензию |
+| POST | `/licenses/validate` | Public | Валидировать ключ |
+| PATCH | `/licenses/:key` | Admin | Изменить лицензию |
+| DELETE | `/licenses/:key` | Admin | Отозвать лицензию |
+
+Admin-запросы требуют заголовок `X-Admin-Secret`.
+
+---
+
+## Groq лимиты (бесплатный план)
+
+| Сервис | Лимит в день |
+|--------|-------------|
+| Транскрипция (Whisper Large v3) | 7 200 минут аудио |
+| Анализ (LLaMA 3.3 70b) | 14 400 запросов |
