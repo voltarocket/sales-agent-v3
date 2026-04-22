@@ -30,7 +30,7 @@ services:
       timeout: 3s
       retries: 10
 
-  # ─── Global Backend (AI Gateway) ────────────────────────
+  # ─── Global Backend (AI Gateway + Licensing) ────────────
   global-backend:
     build: ./global-backend
     restart: unless-stopped
@@ -38,8 +38,14 @@ services:
       - "3002:3002"
     env_file:
       - ./global-backend/.env
+    environment:
+      DATABASE_URL:     postgresql://sales:sales_pass@postgres:5432/sales_agent
+      REQUIRE_LICENSE:  "false"   # set to "true" to enforce license on every AI call
     volumes:
       - global_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
 
   # ─── Local Backend (Business Logic) ─────────────────────
   local-backend:

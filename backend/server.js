@@ -13,6 +13,7 @@ import { WebSocketServer } from "ws";
 
 import { pool, query, waitForDb } from "./db.js";
 import { redis, setJob, getJob } from "./redis.js";
+import { licenseState, initLicense, checkRateLimit, trackUsage } from "./license.js";
 
 dotenv.config();
 
@@ -64,9 +65,15 @@ async function sendToGlobalBackend(wavPath, managerName, phone) {
   form.append("managerName", managerName || "Менеджер");
   form.append("phone", phone || "unknown");
 
+  const licenseHeaders = {};
+  if (process.env.LICENSE_KEY) {
+    licenseHeaders["x-license-key"] = process.env.LICENSE_KEY;
+    licenseHeaders["x-device-id"]   = process.env.DEVICE_ID || "unknown";
+  }
+
   const r = await fetch(`${GLOBAL_URL}/process`, {
     method: "POST",
-    headers: form.getHeaders(),
+    headers: { ...form.getHeaders(), ...licenseHeaders },
     body: form,
     timeout: 120000,
   });
@@ -158,6 +165,13 @@ async function processSession(session, duration) {
   let analysis   = { summary: "", score: 0, errors: [], positives: [], recommendation: "" };
 
   if (audioBuffer.length > 1000 && FFMPEG) {
+    // Check license rate limit before calling AI
+    const rateCheck = await checkRateLimit();
+    if (!rateCheck.allowed) {
+      console.warn(`[WS] rate limit reached (${rateCheck.current}/${rateCheck.limit})`);
+      throw new Error(`Monthly AI request limit reached (${rateCheck.current}/${rateCheck.limit})`);
+    }
+
     const tmpPcm = path.join("uploads", `ws_${Date.now()}.pcm`);
     const tmpWav = tmpPcm + ".wav";
     fs.writeFileSync(tmpPcm, audioBuffer);
@@ -172,6 +186,7 @@ async function processSession(session, duration) {
         const result = await sendToGlobalBackend(tmpWav, session.managerName, session.phone);
         transcript = result.transcript || "";
         analysis   = result.analysis   || analysis;
+        trackUsage(GLOBAL_URL); // async, non-blocking
       } else {
         console.warn("[WS] ffmpeg convert failed:", r.stderr);
       }
@@ -239,11 +254,29 @@ app.get("/api/health", async (_, res) => {
     redis: redisOk,
     globalBackend: globalOk,
     ffmpeg: !!FFMPEG,
+    license: {
+      valid:   licenseState.valid,
+      plan:    licenseState.plan,
+      checked: licenseState.checked,
+    },
     sip: {
       host:      process.env.FREEPBX_HOST    || "localhost",
       wsPort:    process.env.FREEPBX_WS_PORT || "8088",
       extension: process.env.FREEPBX_EXTENSION || "not set",
     },
+  });
+});
+
+// ═══════════════════════════════════════════════════════════
+// LICENSE STATUS
+// ═══════════════════════════════════════════════════════════
+app.get("/api/license/status", (_, res) => {
+  res.json({
+    ...licenseState,
+    licenseKey: process.env.LICENSE_KEY
+      ? process.env.LICENSE_KEY.slice(0, 12) + "..." // mask key
+      : null,
+    deviceId: process.env.DEVICE_ID || null,
   });
 });
 
@@ -567,6 +600,7 @@ fs.mkdirSync("uploads", { recursive: true });
 
 await waitForDb();
 await redis.connect().catch(() => {}); // non-fatal — Redis may not be available locally
+await initLicense(GLOBAL_URL);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, "0.0.0.0", () => {
@@ -574,6 +608,7 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`    DB           : PostgreSQL`);
   console.log(`    Redis        : ${process.env.REDIS_URL || "redis://localhost:6379"}`);
   console.log(`    Global AI    : ${GLOBAL_URL}`);
+  console.log(`    License      : ${process.env.LICENSE_KEY ? `${licenseState.plan} (${licenseState.valid ? "valid" : "invalid"})` : "dev mode"}`);
   console.log(`    ffmpeg       : ${FFMPEG ? "✓" : "✗"}`);
   console.log(`    SIP          : ws://localhost:${process.env.FREEPBX_WS_PORT || 8088}/ws`);
   console.log(`    exts         : ${process.env.FREEPBX_EXTENSION || "?"}${process.env.FREEPBX_EXT_2 ? " + " + process.env.FREEPBX_EXT_2 : ""}\n`);

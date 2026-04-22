@@ -9,6 +9,11 @@ import { spawnSync, execSync } from "child_process";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 
+import {
+  issueLicense, validateLicense, recordUsage,
+  revokeLicense, getLicenseStatus, waitForDb,
+} from "./licenses.js";
+
 dotenv.config();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -157,6 +162,47 @@ async function analyzeYandex(name, transcript) {
 }
 
 // ═══════════════════════════════════════════════════════════
+// ADMIN AUTH MIDDLEWARE
+// ═══════════════════════════════════════════════════════════
+function adminOnly(req, res, next) {
+  const secret = process.env.ADMIN_SECRET;
+  if (!secret) return res.status(503).json({ error: "ADMIN_SECRET not configured" });
+  const provided = req.headers["x-admin-secret"] || req.body?.adminSecret;
+  if (provided !== secret) return res.status(401).json({ error: "Unauthorized" });
+  next();
+}
+
+// ═══════════════════════════════════════════════════════════
+// LICENSE MIDDLEWARE — enforced when REQUIRE_LICENSE=true
+// Expects: X-License-Key and X-Device-Id headers
+// ═══════════════════════════════════════════════════════════
+async function licenseGuard(req, res, next) {
+  if (process.env.REQUIRE_LICENSE !== "true") return next();
+
+  const key      = req.headers["x-license-key"];
+  const deviceId = req.headers["x-device-id"];
+
+  if (!key) return res.status(402).json({ error: "License key required (X-License-Key header)" });
+
+  try {
+    const result = await validateLicense({ key, deviceId });
+    if (!result.valid) return res.status(402).json({ error: result.reason });
+
+    // Rate limit check
+    const { requests_per_month, usage } = result;
+    if (requests_per_month > 0 && usage.used >= requests_per_month)
+      return res.status(429).json({ error: `Monthly request limit reached (${requests_per_month})` });
+
+    req.licenseKey = key;
+    req.deviceId   = deviceId;
+    next();
+  } catch (e) {
+    console.error("[licenseGuard]", e.message);
+    next(); // fail open — don't block on DB errors
+  }
+}
+
+// ═══════════════════════════════════════════════════════════
 // HEALTH
 // ═══════════════════════════════════════════════════════════
 app.get("/health", (_, res) => res.json({
@@ -164,12 +210,13 @@ app.get("/health", (_, res) => res.json({
   transcribe: TRANSCRIBE || "⚠ no key",
   analyze: ANALYZE || "⚠ no key",
   ffmpeg: !!FFMPEG,
+  licensing: process.env.REQUIRE_LICENSE === "true" ? "enforced" : "optional",
 }));
 
 // ═══════════════════════════════════════════════════════════
 // PROCESS — main endpoint: audio → transcript + analysis
 // ═══════════════════════════════════════════════════════════
-app.post("/process", upload.single("audio"), async (req, res) => {
+app.post("/process", licenseGuard, upload.single("audio"), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: "No audio file" });
 
   const managerName = req.body.managerName || "Менеджер";
@@ -223,6 +270,13 @@ app.post("/process", upload.single("audio"), async (req, res) => {
 
     console.log(`[PROCESS] LLM done | score=${analysis.score}`);
 
+    // Record usage asynchronously (don't block response)
+    if (req.licenseKey) {
+      recordUsage({ key: req.licenseKey, deviceId: req.deviceId }).catch(e =>
+        console.error("[PROCESS] usage record failed:", e.message)
+      );
+    }
+
     res.json({ transcript, duration, analysis });
 
   } catch (e) {
@@ -236,7 +290,7 @@ app.post("/process", upload.single("audio"), async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // ANALYZE TEXT  — text-only path (no audio)
 // ═══════════════════════════════════════════════════════════
-app.post("/analyze", async (req, res) => {
+app.post("/analyze", licenseGuard, async (req, res) => {
   const { managerName = "Менеджер", transcript } = req.body;
   if (!transcript) return res.status(400).json({ error: "transcript required" });
   if (!ANALYZE)    return res.status(503).json({ error: "No analysis key configured" });
@@ -254,14 +308,84 @@ app.post("/analyze", async (req, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// LICENSE MANAGEMENT ROUTES
+// ═══════════════════════════════════════════════════════════
+
+// Issue a new license key (admin only)
+app.post("/licenses/issue", adminOnly, async (req, res) => {
+  const { customer, plan, expires_at } = req.body;
+  try {
+    const license = await issueLicense({ customer, plan, expires_at });
+    console.log(`[LICENSE] issued key=${license.key} plan=${license.plan} customer=${license.customer}`);
+    res.json({ ok: true, license });
+  } catch (e) {
+    console.error("[LICENSE] issue error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Validate a license + register device
+app.post("/licenses/validate", async (req, res) => {
+  const { key, deviceId } = req.body;
+  if (!key) return res.status(400).json({ error: "key required" });
+  try {
+    const result = await validateLicense({ key, deviceId });
+    res.json(result);
+  } catch (e) {
+    console.error("[LICENSE] validate error:", e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Record one usage event (called by local backend after successful AI call)
+app.post("/licenses/usage", async (req, res) => {
+  const { key, deviceId } = req.body;
+  if (!key) return res.status(400).json({ error: "key required" });
+  try {
+    await recordUsage({ key, deviceId });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Get full license status (admin or self)
+app.get("/licenses/:key/status", async (req, res) => {
+  try {
+    const status = await getLicenseStatus(req.params.key);
+    if (!status) return res.status(404).json({ error: "License not found" });
+    res.json(status);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Revoke a license (admin only)
+app.delete("/licenses/:key", adminOnly, async (req, res) => {
+  try {
+    await revokeLicense(req.params.key);
+    console.log(`[LICENSE] revoked key=${req.params.key}`);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ═══════════════════════════════════════════════════════════
 // START
 // ═══════════════════════════════════════════════════════════
 fs.mkdirSync("uploads", { recursive: true });
 
+// Connect to DB for licensing (non-fatal — AI still works without DB)
+if (process.env.DATABASE_URL) {
+  waitForDb(5, 2000).catch(e => console.warn("[Licenses DB] unavailable:", e.message));
+}
+
 const PORT = process.env.PORT || 3002;
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🌐  Global Backend → http://localhost:${PORT}`);
-  console.log(`    STT    : ${TRANSCRIBE || "⚠ no key"}`);
-  console.log(`    LLM    : ${ANALYZE    || "⚠ no key"}`);
-  console.log(`    ffmpeg : ${FFMPEG ? "✓" : "✗"}\n`);
+  console.log(`    STT      : ${TRANSCRIBE || "⚠ no key"}`);
+  console.log(`    LLM      : ${ANALYZE    || "⚠ no key"}`);
+  console.log(`    ffmpeg   : ${FFMPEG ? "✓" : "✗"}`);
+  console.log(`    licensing: ${process.env.REQUIRE_LICENSE === "true" ? "enforced" : "optional (set REQUIRE_LICENSE=true)"}\n`);
 });

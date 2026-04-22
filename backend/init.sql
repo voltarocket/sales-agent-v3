@@ -47,6 +47,36 @@ CREATE TABLE IF NOT EXISTS settings (
   value TEXT
 );
 
+-- ─── Licensing ───────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS licenses (
+  key                 VARCHAR(64)  PRIMARY KEY,
+  customer            VARCHAR(255) DEFAULT '',
+  plan                VARCHAR(50)  DEFAULT 'basic',
+  max_devices         INTEGER      DEFAULT 1,   -- -1 = unlimited
+  requests_per_month  INTEGER      DEFAULT 100, -- -1 = unlimited
+  expires_at          TIMESTAMP,
+  is_active           BOOLEAN      DEFAULT TRUE,
+  created_at          TIMESTAMP    DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS license_devices (
+  id           SERIAL    PRIMARY KEY,
+  license_key  VARCHAR(64) REFERENCES licenses(key) ON DELETE CASCADE,
+  device_id    VARCHAR(255) NOT NULL,
+  first_seen   TIMESTAMP DEFAULT NOW(),
+  last_seen    TIMESTAMP DEFAULT NOW(),
+  UNIQUE(license_key, device_id)
+);
+
+CREATE TABLE IF NOT EXISTS license_usage (
+  id           SERIAL    PRIMARY KEY,
+  license_key  VARCHAR(64) REFERENCES licenses(key) ON DELETE CASCADE,
+  device_id    VARCHAR(255) DEFAULT 'unknown',
+  month        CHAR(7)   NOT NULL,   -- YYYY-MM
+  requests     INTEGER   DEFAULT 0,
+  UNIQUE(license_key, month)
+);
+
 -- Default seed data
 INSERT INTO managers (name, avatar, color)
   VALUES ('Менеджер', 'МН', '#6366f1')
