@@ -1,35 +1,39 @@
 # Sales Call Analyzer v3
 
 Система анализа звонков менеджеров по продажам.
-Телефон пишет разговор → локальный бэкенд ставит задачу → глобальный бэкенд транскрибирует и анализирует через ИИ → десктоп показывает результаты.
+Телефон пишет разговор → локальный бэкенд обрабатывает → глобальный бэкенд транскрибирует и анализирует через ИИ → десктоп показывает результаты.
 
 ---
 
 ## Архитектура
 
 ```
-Desktop / Admin (Electron)
-        │ REST + WebSocket
-        ▼
-┌─────────────────────────────────┐
-│  LOCAL BACKEND  :3001           │
-│  Бизнес-логика + PostgreSQL     │
-│  Менеджеры, звонки, контакты    │
-│  Redis — очередь задач + кэш    │
-│  Проверка лицензии              │
-└────────────┬────────────────────┘
-             │ HTTP (audio + text)
-             ▼
-┌─────────────────────────────────┐
-│  GLOBAL BACKEND  :3002          │
-│  AI-шлюз: Groq Whisper + LLaMA  │
-│  Лицензирование (выдача ключей) │
-│  Управление тарифными планами   │
-└─────────────────────────────────┘
-             │
-     ┌───────┴───────┐
-     ▼               ▼
- PostgreSQL :5432   Redis :6379
+                    ┌─────────────────────────────────┐
+                    │  WEBSITE  :3003                  │
+                    │  React SPA (Vite)                │
+                    │  Регистрация / Скачать приложения│
+                    │  FastAPI + PostgreSQL             │
+                    └──────────────┬──────────────────┘
+                                   │ /api/auth/verify
+Desktop / Admin (Electron)         │
+        │ REST + WebSocket         │
+        ▼                          ▼
+┌─────────────────────────────────────────────────────┐
+│  LOCAL BACKEND  :3001  (Python / FastAPI)           │
+│  Бизнес-логика + PostgreSQL                         │
+│  Менеджеры, звонки, контакты, настройки             │
+│  In-memory кэш — лицензия + счётчики                │
+│  Проверка лицензии перед каждым AI-вызовом          │
+└──────────────────────────┬──────────────────────────┘
+                           │ HTTP (audio + text)
+                           ▼
+┌─────────────────────────────────────────────────────┐
+│  GLOBAL BACKEND  :3002  (Python / FastAPI)          │
+│  AI-шлюз: Groq Whisper + LLaMA 3.3 70b             │
+│  Лицензирование: выдача ключей, валидация           │
+└──────────────────────────┬──────────────────────────┘
+                           │
+                    PostgreSQL :5432
 ```
 
 ---
@@ -38,25 +42,38 @@ Desktop / Admin (Electron)
 
 ```
 sales-agent-v3/
-├── backend/              ← Локальный бэкенд (Node.js + Express)
-│   ├── server.js         ← API + WebSocket + прокси к global-backend
-│   ├── db.js             ← PostgreSQL пул
-│   ├── redis.js          ← ioredis + статусы задач
-│   ├── license.js        ← Валидация лицензии, кэш, rate limit
+├── backend/              ← Локальный бэкенд (Python / FastAPI :3001)
+│   ├── main.py           ← Весь API: звонки, контакты, менеджеры, лицензия, WebSocket
 │   ├── init.sql          ← Схема БД (авто-применяется в Docker)
+│   ├── requirements.txt
+│   ├── Dockerfile
 │   └── .env.example
-├── global-backend/       ← Глобальный бэкенд (Node.js + Express)
-│   ├── server.js         ← /process, /analyze, /plans, /licenses
-│   ├── licenses.js       ← Операции с лицензиями и планами (PostgreSQL)
+├── global-backend/       ← Глобальный бэкенд (Python / FastAPI :3002)
+│   ├── main.py           ← /process, /analyze, /plans, /licenses
+│   ├── requirements.txt
+│   ├── Dockerfile
 │   └── .env.example
+├── website/              ← Сайт для регистрации и скачивания
+│   ├── backend/          ← FastAPI :3003
+│   │   ├── main.py       ← Регистрация, авторизация, выдача лицензий, admin API
+│   │   ├── requirements.txt
+│   │   ├── Dockerfile
+│   │   └── .env.example
+│   └── frontend/         ← React + Vite
+│       ├── src/
+│       │   ├── pages/Home.jsx       ← Лендинг + регистрация
+│       │   ├── pages/Login.jsx      ← Вход
+│       │   ├── pages/Dashboard.jsx  ← Лицензионный ключ + скачать
+│       │   └── pages/Admin.jsx      ← Управление пользователями
+│       └── vite.config.js
 ├── desktop/              ← Electron (дашборд менеджера)
 ├── admin/                ← Electron (панель администратора)
 │   └── src/
-│       ├── main.js       ← IPC + локальная БД
+│       ├── main.js       ← IPC + auth через website API
 │       ├── renderer.js   ← Весь UI (менеджеры, лицензии, настройки)
 │       └── preload.js    ← IPC bridge
 ├── android/              ← Kotlin (запись звонков с телефона)
-├── docker-compose.yml    ← Поднимает все 4 сервиса
+├── docker-compose.yml    ← Поднимает все сервисы
 └── package.json          ← Скрипты для разработки
 ```
 
@@ -67,19 +84,23 @@ sales-agent-v3/
 ### 1. Зависимости
 
 - [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-- [Node.js LTS](https://nodejs.org) (для Electron-приложений)
-- [ffmpeg](https://ffmpeg.org/download.html) (для локальной разработки без Docker)
+- [Node.js LTS](https://nodejs.org) (для Electron-приложений и сборки фронтенда)
+- [Python 3.12+](https://www.python.org) (для локальной разработки без Docker)
+- [ffmpeg](https://ffmpeg.org/download.html) (для разработки без Docker)
 
 ### 2. Настройка .env файлов
 
 ```bash
 # Глобальный бэкенд — AI-ключи
 cp global-backend/.env.example global-backend/.env
-notepad global-backend/.env   # вставь GROQ_API_KEY и ADMIN_SECRET
+# вставь GROQ_API_KEY и ADMIN_SECRET
 
 # Локальный бэкенд
 cp backend/.env.example backend/.env
-notepad backend/.env          # вставь GLOBAL_ADMIN_SECRET (= ADMIN_SECRET выше)
+# вставь GLOBAL_ADMIN_SECRET (= ADMIN_SECRET выше)
+
+# Сайт
+cp website/backend/.env.example website/backend/.env
 ```
 
 Минимально необходимые переменные:
@@ -87,18 +108,26 @@ notepad backend/.env          # вставь GLOBAL_ADMIN_SECRET (= ADMIN_SECRET
 | Файл | Переменная | Значение |
 |------|-----------|----------|
 | `global-backend/.env` | `GROQ_API_KEY` | Ключ с [console.groq.com](https://console.groq.com) |
-| `global-backend/.env` | `ADMIN_SECRET` | Любая строка-пароль для администратора |
+| `global-backend/.env` | `ADMIN_SECRET` | Любая строка-пароль |
 | `backend/.env` | `GLOBAL_ADMIN_SECRET` | Та же строка, что `ADMIN_SECRET` выше |
 
-### 3. Запуск
+### 3. Сборка фронтенда сайта
+
+```bash
+cd website/frontend
+npm install
+npm run build      # собирает в website/backend/static/
+```
+
+### 4. Запуск
 
 ```bash
 npm run docker:up
 ```
 
-Это поднимет: PostgreSQL, Redis, Global Backend, Local Backend.
+Поднимает: PostgreSQL, Global Backend (:3002), Local Backend (:3001), Website (:3003).
 
-### 4. Electron-приложения (отдельно)
+### 5. Electron-приложения (отдельно)
 
 ```bash
 npm run install:all    # установить зависимости
@@ -110,91 +139,56 @@ npm run dev:admin      # панель администратора
 
 ## Разработка без Docker
 
-Требуется локально: Node.js, PostgreSQL, Redis, ffmpeg.
-
 ```bash
-# Запустить всё сразу
-npm run dev:all
+# Установить зависимости Python
+pip install -r backend/requirements.txt
+pip install -r global-backend/requirements.txt
+pip install -r website/backend/requirements.txt
 
-# Или по отдельности:
-npm run dev:global    # global-backend :3002
-npm run dev:local     # local-backend  :3001
-npm run dev:desktop   # Electron менеджер
-npm run dev:admin     # Electron администратор
+# Запустить по отдельности:
+python backend/main.py           # local-backend  :3001
+python global-backend/main.py    # global-backend :3002
+python website/backend/main.py   # website        :3003
+
+# Фронтенд сайта в режиме разработки:
+npm run dev:website              # http://localhost:5173
+
+# Electron:
+npm run dev:desktop
+npm run dev:admin
 ```
 
 ---
 
-## Лицензирование
+## Как работает регистрация и лицензия
 
-### Как работает
-
-1. **Глобальный бэкенд** выдаёт лицензионные ключи и хранит тарифные планы в PostgreSQL.
-2. **Локальный бэкенд** при старте валидирует ключ (результат кэшируется в Redis на 1 час).
-3. Перед каждым AI-вызовом проверяется счётчик использования в Redis.
-4. После успешного анализа — счётчик инкрементируется и асинхронно отправляется в global-backend.
-
-### Тарифные планы (по умолчанию)
-
-| План | Устройств | Запросов/мес |
-|------|-----------|-------------|
-| `basic` | 1 | 100 |
-| `pro` | 5 | 1 000 |
-| `enterprise` | ∞ | ∞ |
-
-Планы хранятся в базе данных и редактируются через **Admin Panel → Лицензии → Тарифные планы**.
-
-### Выдать лицензию через Admin Panel
-
-1. Открой Admin Panel
-2. Войди (по умолчанию: `admin` / `admin`)
-3. Перейди в раздел **Лицензии**
-4. Нажми **+ Выдать лицензию**, выбери клиента и план
-5. Скопируй выданный ключ и добавь в `backend/.env`:
+1. Пользователь заходит на сайт `:3003` и регистрируется (имя, email, пароль)
+2. При регистрации автоматически создаётся **лицензионный ключ** (безлимитный план)
+3. На странице Dashboard пользователь видит свой ключ и кнопки скачать приложения
+4. Ключ добавляется в `backend/.env`:
 
 ```env
 LICENSE_KEY=SALES-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
-DEVICE_ID=my-server-1   # опционально, иначе auto
 ```
 
-### Выдать лицензию через API
+5. При входе в **Admin App** используется тот же email и пароль с сайта
+6. Локальный бэкенд при старте валидирует ключ через global-backend (кэш 1 час)
+7. Без валидного ключа — AI-вызовы (транскрипция + анализ) блокируются
 
-```bash
-curl -X POST http://localhost:3002/licenses/issue \
-  -H "X-Admin-Secret: your-secret" \
-  -H "Content-Type: application/json" \
-  -d '{ "customer": "ООО Ромашка", "plan": "pro" }'
-```
-
-### Изменить план лицензии
-
-Через Admin Panel: раздел **Лицензии** → выпадающий список в строке лицензии.
-
-Или через API:
-
-```bash
-curl -X PATCH http://localhost:3002/licenses/SALES-XXXX... \
-  -H "X-Admin-Secret: your-secret" \
-  -H "Content-Type: application/json" \
-  -d '{ "plan": "enterprise" }'
-```
-
-### Изменить условия плана
-
-Через Admin Panel: **Лицензии → Тарифные планы → ✏ (редактировать)**.
-
-Или через API:
-
-```bash
-curl -X PUT http://localhost:3002/plans/pro \
-  -H "X-Admin-Secret: your-secret" \
-  -H "Content-Type: application/json" \
-  -d '{ "max_devices": 10, "requests_per_month": 2000 }'
-```
-
-### Dev-режим (без лицензии)
+### Dev-режим
 
 Если `LICENSE_KEY` не задан в `backend/.env` — все AI-запросы работают без ограничений.
+
+---
+
+## Сайт (`/admin`)
+
+Страница `http://localhost:3003/admin` — панель управления пользователями для владельца системы.
+
+- Логин: `admin` / `admin` (настраивается через `SITE_ADMIN_USER` / `SITE_ADMIN_PASS`)
+- Просмотр всех зарегистрированных пользователей
+- Статистика: всего пользователей, активных, проанализированных звонков
+- Блокировка / разблокировка пользователей
 
 ---
 
@@ -215,12 +209,6 @@ curl -X PUT http://localhost:3002/plans/pro \
 ws://192.168.1.XXX:3001
 ```
 
-Узнать IP компьютера:
-
-```bash
-ipconfig    # Windows
-```
-
 Телефон и компьютер должны быть в одной Wi-Fi сети.
 
 ---
@@ -233,18 +221,23 @@ ipconfig    # Windows
 |-------|------|----------|
 | GET | `/api/health` | Статус всех компонентов |
 | GET | `/api/license/status` | Текущий статус лицензии |
+| POST | `/api/license/activate` | Активировать лицензионный ключ |
 | GET/POST | `/api/calls` | Звонки |
-| GET/POST/PUT/DELETE | `/api/contacts` | Контакты |
-| GET/POST/PUT/DELETE | `/api/managers` | Менеджеры |
-| GET/PUT | `/api/settings` | Настройки |
-| POST | `/api/notify` | Telegram уведомление |
-| GET | `/api/plans` | Список тарифных планов |
-| POST | `/api/plans` | Создать план |
-| PUT | `/api/plans/:name` | Изменить план |
-| GET | `/api/licenses` | Список лицензий |
-| POST | `/api/licenses/issue` | Выдать лицензию |
-| PUT | `/api/licenses/:key` | Изменить план лицензии |
-| DELETE | `/api/licenses/:key` | Отозвать лицензию |
+| PUT/DELETE | `/api/calls/{id}` | Изменить / удалить звонок |
+| GET/POST | `/api/contacts` | Контакты |
+| GET/PUT/DELETE | `/api/contacts/{id}` | Контакт по ID |
+| GET/POST | `/api/managers` | Менеджеры |
+| PUT/DELETE | `/api/managers/{id}` | Изменить / удалить менеджера |
+| POST | `/api/managers/{id}/stats` | Обновить статистику менеджера |
+| DELETE | `/api/managers/{id}/reset` | Сбросить статистику |
+| GET/PUT | `/api/settings/{key}` | Настройки |
+| POST | `/api/notify` | Telegram-уведомление |
+| GET | `/api/sip/config` | Конфигурация SIP/FreePBX |
+| POST | `/api/transcribe` | Аудио → транскрипт (прокси) |
+| POST | `/api/analyze` | Текст → анализ (прокси) |
+| GET | `/api/jobs/{id}` | Статус задачи |
+| GET | `/api/plans` | Тарифные планы (прокси) |
+| GET | `/api/licenses` | Список лицензий (прокси) |
 
 ### Global Backend (:3002)
 
@@ -254,16 +247,28 @@ ipconfig    # Windows
 | POST | `/process` | License | Аудио → транскрипт + анализ |
 | POST | `/analyze` | License | Текст → анализ |
 | GET | `/plans` | Admin | Список планов |
-| POST | `/plans` | Admin | Создать план |
-| PUT | `/plans/:name` | Admin | Изменить план |
-| DELETE | `/plans/:name` | Admin | Удалить план |
 | GET | `/licenses` | Admin | Список лицензий |
 | POST | `/licenses/issue` | Admin | Выдать лицензию |
 | POST | `/licenses/validate` | Public | Валидировать ключ |
-| PATCH | `/licenses/:key` | Admin | Изменить лицензию |
-| DELETE | `/licenses/:key` | Admin | Отозвать лицензию |
+| PATCH | `/licenses/{key}` | Admin | Изменить лицензию |
+| DELETE | `/licenses/{key}` | Admin | Отозвать лицензию |
 
 Admin-запросы требуют заголовок `X-Admin-Secret`.
+
+### Website (:3003)
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/api/auth/register` | Регистрация (авто-выдаёт лицензию) |
+| POST | `/api/auth/login` | Вход |
+| POST | `/api/auth/verify` | Проверка credentials (для Electron) |
+| POST | `/api/auth/logout` | Выход |
+| GET | `/api/user/me` | Данные пользователя + ключ |
+| GET | `/api/user/downloads` | Ссылки на скачивание |
+| POST | `/api/admin/login` | Вход администратора сайта |
+| GET | `/api/admin/users` | Список пользователей |
+| GET | `/api/admin/stats` | Статистика |
+| PATCH | `/api/admin/users/{id}/toggle` | Блок / разблок |
 
 ---
 
