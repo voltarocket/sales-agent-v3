@@ -28,6 +28,7 @@ DOWNLOADS = [
     {"id": "desktop",  "title": "Desktop App",    "desc": "Приложение менеджера (Windows)",  "url": os.getenv("DOWNLOAD_DESKTOP", "#"),  "icon": "🖥"},
     {"id": "admin",    "title": "Admin App",       "desc": "Панель администратора (Windows)", "url": os.getenv("DOWNLOAD_ADMIN",   "#"),  "icon": "⚙️"},
     {"id": "backend",  "title": "Local Backend",   "desc": "Локальный сервер (Docker)",       "url": os.getenv("DOWNLOAD_BACKEND", "#"),  "icon": "🐳"},
+    {"id": "android",  "title": "Android App",     "desc": "Запись звонков с телефона (APK)", "url": os.getenv("DOWNLOAD_ANDROID", "#"),  "icon": "📱"},
 ]
 
 pool: asyncpg.Pool = None  # type: ignore
