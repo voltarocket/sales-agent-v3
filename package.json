@@ -12,6 +12,8 @@
     "docker:up":       "docker compose up --build",
     "docker:down":     "docker compose down",
     "docker:logs":     "docker compose logs -f",
+    "dev:website":     "cd website/frontend && npm run dev",
+    "install:website": "cd website/frontend && npm install",
     "install:all":     "npm install && cd backend && npm install && cd ../global-backend && npm install && cd ../desktop && npm install && cd ../admin && npm install"
   },
   "devDependencies": { "concurrently": "^8.2.2" }

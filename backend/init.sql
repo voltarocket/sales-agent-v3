@@ -57,9 +57,7 @@ CREATE TABLE IF NOT EXISTS license_plans (
 );
 
 INSERT INTO license_plans (name, display_name, max_devices, requests_per_month, description) VALUES
-  ('basic',      'Базовый',        1,  100,  'Для одного устройства, до 100 запросов в месяц'),
-  ('pro',        'Профессиональный', 5, 1000, 'До 5 устройств, до 1000 запросов в месяц'),
-  ('enterprise', 'Корпоративный',  -1, -1,   'Неограниченные устройства и запросы')
+  ('unlimited', 'Безлимитный', -1, -1, 'Неограниченные устройства и запросы')
 ON CONFLICT DO NOTHING;
 
 CREATE TABLE IF NOT EXISTS licenses (
@@ -89,6 +87,18 @@ CREATE TABLE IF NOT EXISTS license_usage (
   month        CHAR(7)   NOT NULL,   -- YYYY-MM
   requests     INTEGER   DEFAULT 0,
   UNIQUE(license_key, month)
+);
+
+CREATE TABLE IF NOT EXISTS website_users (
+  id            SERIAL PRIMARY KEY,
+  email         VARCHAR(255) UNIQUE NOT NULL,
+  name          VARCHAR(255) DEFAULT '',
+  password_hash VARCHAR(64)  NOT NULL,
+  license_key   VARCHAR(64)  UNIQUE REFERENCES licenses(key),
+  calls_analyzed INTEGER     DEFAULT 0,
+  last_login    TIMESTAMP,
+  created_at    TIMESTAMP    DEFAULT NOW(),
+  is_active     BOOLEAN      DEFAULT TRUE
 );
 
 -- Default seed data

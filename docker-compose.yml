@@ -55,6 +55,21 @@ services:
       global-backend:
         condition: service_started
 
+  # ─── Website (User Registration + Downloads) ────────────
+  website:
+    build: ./website/backend
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    env_file:
+      - ./website/backend/.env
+    environment:
+      DATABASE_URL:           postgresql://sales:sales_pass@postgres:5432/sales_agent
+      GLOBAL_BACKEND_URL:     http://global-backend:3002
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   global_uploads:

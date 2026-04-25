@@ -35,9 +35,7 @@ ANALYZE:    Optional[str] = "groq" if GROQ_API_KEY else ("yandex" if YANDEX_API_
 # ═══════════════════════════════════════════════════════════
 
 PLANS: dict[str, dict] = {
-    "basic":      {"max_devices": 1,  "requests_per_month": 100},
-    "pro":        {"max_devices": 5,  "requests_per_month": 1000},
-    "enterprise": {"max_devices": -1, "requests_per_month": -1},
+    "unlimited": {"max_devices": -1, "requests_per_month": -1},
 }
 
 # ═══════════════════════════════════════════════════════════
@@ -198,14 +196,14 @@ async def list_licenses() -> list:
     )
     return [dict(r) for r in rows]
 
-async def issue_license(customer: str = "", plan: str = "basic", expires_at: Any = None) -> dict:
+async def issue_license(customer: str = "", plan: str = "unlimited", expires_at: Any = None) -> dict:
     # Fetch limits from DB, fall back to hardcoded defaults
     db_plan = None
     try:
         db_plan = await pool.fetchrow("SELECT * FROM license_plans WHERE name=$1", plan)
     except Exception:
         pass
-    limits = dict(db_plan) if db_plan else PLANS.get(plan, PLANS["basic"])
+    limits = dict(db_plan) if db_plan else PLANS.get(plan, PLANS["unlimited"])
     key = "SALES-" + secrets.token_hex(16).upper()
     row = await pool.fetchrow(
         """INSERT INTO licenses (key, customer, plan, max_devices, requests_per_month, expires_at)
@@ -665,7 +663,7 @@ async def licenses_issue(request: Request):
     try:
         license = await issue_license(
             customer   = body.get("customer", ""),
-            plan       = body.get("plan", "basic"),
+            plan       = body.get("plan", "unlimited"),
             expires_at = body.get("expires_at"),
         )
         print(f"[LICENSE] issued key={license['key']} plan={license['plan']} customer={license['customer']}")

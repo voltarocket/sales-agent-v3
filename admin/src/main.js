@@ -87,18 +87,37 @@ function isLocalEndpoint(endpoint) {
   );
 }
 
-function handleLocal(endpoint, method, body, token) {
+async function handleLocal(endpoint, method, body, token) {
   const seg = endpoint.split("/").filter(Boolean);
 
   // ── AUTH ────────────────────────────────────────────────
   if (endpoint === "/api/auth/admin" && method === "POST") {
     const { username, password } = body || {};
-    const adm = db.admin || {};
-    if ((username || "").trim() !== adm.username)  return { error: "Неверный логин или пароль" };
-    if (hashPw(password || "") !== adm.password_hash) return { error: "Неверный логин или пароль" };
-    const t = genToken();
-    adminSessions[t] = true;
-    return { ok: true, token: t };
+    // Try website API first (email = username field)
+    const websiteUrl = process.env.WEBSITE_URL || "http://localhost:3003";
+    try {
+      const r = await fetch(`${websiteUrl}/api/auth/verify`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: username, password }),
+        signal: AbortSignal.timeout(5000),
+      });
+      const data = await r.json();
+      if (data.ok) {
+        const t = genToken();
+        adminSessions[t] = true;
+        return { ok: true, token: t, user: data.user };
+      }
+      return { error: "Неверный логин или пароль" };
+    } catch (_) {
+      // Fallback to local credentials
+      const adm = db.admin || {};
+      if ((username || "").trim() !== adm.username)     return { error: "Неверный логин или пароль" };
+      if (hashPw(password || "") !== adm.password_hash) return { error: "Неверный логин или пароль" };
+      const t = genToken();
+      adminSessions[t] = true;
+      return { ok: true, token: t };
+    }
   }
 
   if (endpoint === "/api/auth/admin" && method === "PUT") {
@@ -268,7 +287,7 @@ async function apiBackend(endpoint, method = "GET", body = null) {
   } catch (e) { return { error: e.message }; }
 }
 
-function apiCall(endpoint, method = "GET", body = null) {
+async function apiCall(endpoint, method = "GET", body = null) {
   if (isLocalEndpoint(endpoint)) return handleLocal(endpoint, method, body, adminToken);
   return apiBackend(endpoint, method, body);
 }
