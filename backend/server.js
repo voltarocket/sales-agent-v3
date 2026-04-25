@@ -640,14 +640,14 @@ app.post("/api/notify", async (req, res) => {
 fs.mkdirSync("uploads", { recursive: true });
 
 await waitForDb();
-await redis.connect().catch(() => {}); // non-fatal — Redis may not be available locally
+await redis.connect(); // in-memory cache, always ready
 await initLicense(GLOBAL_URL, query);
 
 const PORT = process.env.PORT || 3001;
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🚀  Local Backend → http://localhost:${PORT}`);
   console.log(`    DB           : PostgreSQL`);
-  console.log(`    Redis        : ${process.env.REDIS_URL || "redis://localhost:6379"}`);
+  console.log(`    Cache        : in-memory`);
   console.log(`    Global AI    : ${GLOBAL_URL}`);
   console.log(`    License      : ${process.env.LICENSE_KEY ? `${licenseState.plan} (${licenseState.valid ? "valid" : "invalid"})` : "dev mode"}`);
   console.log(`    ffmpeg       : ${FFMPEG ? "✓" : "✗"}`);

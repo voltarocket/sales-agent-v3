@@ -19,17 +19,6 @@ services:
       timeout: 5s
       retries: 10
 
-  redis:
-    image: redis:7-alpine
-    restart: unless-stopped
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
-      retries: 10
-
   # ─── Global Backend (AI Gateway + Licensing) ────────────
   global-backend:
     build: ./global-backend
@@ -57,14 +46,11 @@ services:
       - ./backend/.env
     environment:
       DATABASE_URL:        postgresql://sales:sales_pass@postgres:5432/sales_agent
-      REDIS_URL:           redis://redis:6379
       GLOBAL_BACKEND_URL:  http://global-backend:3002
     volumes:
       - local_uploads:/app/uploads
     depends_on:
       postgres:
-        condition: service_healthy
-      redis:
         condition: service_healthy
       global-backend:
         condition: service_started
