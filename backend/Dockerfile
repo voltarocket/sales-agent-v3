@@ -1,17 +1,14 @@
-FROM node:20-slim
+FROM python:3.12-slim
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends ffmpeg && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-COPY package.json .
-RUN npm install --omit=dev
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
 
-COPY server.js db.js redis.js ./
+COPY main.py .
 RUN mkdir -p uploads
 
 EXPOSE 3001
-
-CMD ["node", "server.js"]
+CMD ["python", "main.py"]
