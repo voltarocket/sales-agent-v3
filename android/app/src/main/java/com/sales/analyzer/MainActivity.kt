@@ -288,7 +288,7 @@ class MainActivity : ComponentActivity() {
                     Spacer(Modifier.height(8.dp))
                     OutlinedTextField(
                         value = url, onValueChange = onChange,
-                        placeholder = { Text("ws://192.168.1.100:3001", color = C.text3) },
+                        placeholder = { Text("192.168.1.100:3001 или ws://192.168.1.100:3001", color = C.text3) },
                         colors = OutlinedTextFieldDefaults.colors(
                             focusedBorderColor = C.accent,
                             unfocusedBorderColor = C.border,
@@ -299,12 +299,16 @@ class MainActivity : ComponentActivity() {
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        "IP компьютера с бэкендом.\nНайти: ipconfig → IPv4 Address",
+                        "IP компьютера с бэкендом (автоматически конвертируется в ws://)\nНайти: ipconfig → IPv4 Address",
                         color = C.text3, fontSize = 11.sp
                     )
                     Spacer(Modifier.height(12.dp))
                     Button(
-                        onClick = onSave,
+                        onClick = {
+                            val validUrl = normalizeWebSocketUrl(url)
+                            onChange(validUrl)
+                            onSave()
+                        },
                         colors = ButtonDefaults.buttonColors(containerColor = C.accent, contentColor = Color(0xFF0A0A0F)),
                         modifier = Modifier.fillMaxWidth()
                     ) {
@@ -347,6 +351,20 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    private fun normalizeWebSocketUrl(input: String): String {
+        val trimmed = input.trim()
+        if (trimmed.isEmpty()) return "ws://192.168.1.166:3001"
+
+        val withScheme = when {
+            trimmed.startsWith("ws://") || trimmed.startsWith("wss://") -> trimmed
+            trimmed.startsWith("http://") -> trimmed.replace("http://", "ws://")
+            trimmed.startsWith("https://") -> trimmed.replace("https://", "wss://")
+            else -> "ws://$trimmed"
+        }
+
+        return if (withScheme.contains(":")) withScheme else "$withScheme:3001"
     }
 
     private fun formatNumber(raw: String): String {
