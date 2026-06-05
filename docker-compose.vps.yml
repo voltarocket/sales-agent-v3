@@ -1,11 +1,16 @@
-# VPS deployment — global backend + AI gateway + licensing
+# Beget VPS deployment — global backend + website + postgres on one server
 # Usage: docker compose -f docker-compose.vps.yml up -d --build
 #
-# Required .env files:
+# Required .env files (copy from .env.example and fill in):
 #   global-backend/.env  — set GROQ_API_KEY, ADMIN_SECRET
+#   website/backend/.env — set GLOBAL_BACKEND_URL=http://localhost:3002,
+#                          GLOBAL_ADMIN_SECRET, SITE_ADMIN_PASS, DOWNLOAD_* URLs
 #
-# After first start, open port 3002 in your VPS firewall.
-# The website on Beget must point GLOBAL_BACKEND_URL to this VPS.
+# Before starting: build the React frontend once:
+#   cd website/frontend && npm install && npm run build
+#
+# Open ports in VPS firewall: 3002 (global backend), 3003 (website)
+# Or put nginx in front on port 80/443 and keep 3002/3003 closed externally.
 
 services:
 
@@ -39,6 +44,23 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  website:
+    build: ./website/backend
+    restart: unless-stopped
+    ports:
+      - "3003:3003"
+    env_file:
+      - ./website/backend/.env
+    environment:
+      DATABASE_URL:        postgresql://sales:sales_pass@postgres:5432/sales_agent
+      # On the same VPS, website talks to global-backend via Docker network
+      GLOBAL_BACKEND_URL:  http://global-backend:3002
+    depends_on:
+      postgres:
+        condition: service_healthy
+      global-backend:
+        condition: service_started
 
 volumes:
   postgres_data:

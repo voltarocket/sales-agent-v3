@@ -12,10 +12,9 @@
 - [Варианты развёртывания](#варианты-развёртывания)
   - [Вариант A — всё на одном сервере (разработка / тест)](#вариант-a--всё-на-одном-сервере-разработка--тест)
   - [Вариант B — распределённый продакшен](#вариант-b--распределённый-продакшен)
-    - [Шаг 1 — Глобальный бэкенд на VPS](#шаг-1--глобальный-бэкенд-на-vps)
-    - [Шаг 2 — Сайт на Beget VPS](#шаг-2--сайт-на-beget-vps)
-    - [Шаг 3 — Локальный бэкенд в локальной сети](#шаг-3--локальный-бэкенд-в-локальной-сети)
-    - [Шаг 4 — Desktop и Admin приложения](#шаг-4--desktop-и-admin-приложения)
+    - [Шаг 1 — Beget VPS: global backend + сайт](#шаг-1--beget-vps-global-backend--сайт)
+    - [Шаг 2 — Локальный бэкенд в локальной сети](#шаг-2--локальный-бэкенд-в-локальной-сети)
+    - [Шаг 3 — Desktop, Admin и Android приложения](#шаг-3--desktop-admin-и-android-приложения)
 - [Разработка без Docker](#разработка-без-docker)
 - [Как работает лицензия](#как-работает-лицензия)
 - [Сайт и панель администратора](#сайт-и-панель-администратора)
@@ -28,27 +27,28 @@
 ## Архитектура
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│  INTERNET                                                        │
+┌──────────────────────────────────────────────────────────────────┐
+│  BEGET VPS  (один сервер, docker-compose.vps.yml)                │
 │                                                                  │
 │  ┌───────────────────────────────┐                              │
-│  │  WEBSITE  :3003               │   ← Beget VPS                │
+│  │  WEBSITE  :3003               │                              │
 │  │  React SPA + FastAPI          │                              │
 │  │  Регистрация, скачивания,     │                              │
 │  │  панель владельца системы     │                              │
 │  └───────────────┬───────────────┘                              │
-│                  │ GLOBAL_BACKEND_URL (HTTP)                    │
+│                  │ http://global-backend:3002 (Docker-сеть)     │
 │  ┌───────────────▼───────────────┐                              │
-│  │  GLOBAL BACKEND  :3002        │   ← Другой VPS               │
+│  │  GLOBAL BACKEND  :3002        │                              │
 │  │  AI-шлюз: Groq Whisper + LLM  │                              │
 │  │  Лицензирование               │                              │
-│  │  PostgreSQL :5432             │                              │
-│  └───────────────────────────────┘                              │
-└─────────────────────────────────────────────────────────────────┘
-                  ▲ GLOBAL_BACKEND_URL (HTTP)
+│  └───────────────┬───────────────┘                              │
+│                  │                                              │
+│            PostgreSQL :5432                                     │
+└──────────────────────────────────────────────────────────────────┘
+                  ▲ http://BEGET-IP:3002
                   │
 ┌─────────────────┴───────────────────────────────────────────────┐
-│  ЛОКАЛЬНАЯ СЕТЬ (офис)                                           │
+│  ЛОКАЛЬНАЯ СЕТЬ (офис, docker-compose.local.yml)                 │
 │                                                                  │
 │  ┌─────────────────────────────────────┐                        │
 │  │  LOCAL BACKEND  :3001               │  ← один на офис        │
@@ -56,14 +56,10 @@
 │  │  Менеджеры, звонки, контакты        │                        │
 │  └───────┬──────────────────┬──────────┘                        │
 │          │ WebSocket        │ HTTP                               │
-│  ┌───────▼──────┐  ┌────────▼───────┐                          │
-│  │ Desktop App  │  │   Admin App    │  ← на каждом компьютере  │
-│  │  (Electron)  │  │   (Electron)   │                          │
-│  └──────────────┘  └────────────────┘                          │
-│                                                                  │
-│  ┌───────────────────────┐                                      │
-│  │  Android / телефон    │  ← WebSocket ws://LAN-IP:3001        │
-│  └───────────────────────┘                                      │
+│  ┌───────▼──────┐  ┌────────▼───────┐  ┌──────────────────┐   │
+│  │ Desktop App  │  │   Admin App    │  │  Android / тел.  │   │
+│  │  (Electron)  │  │   (Electron)   │  │  ws://LAN-IP:3001│   │
+│  └──────────────┘  └────────────────┘  └──────────────────┘   │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -205,34 +201,38 @@ npm run dev:admin      # панель администратора
 ### Вариант B — распределённый продакшен
 
 ```
-Beget VPS       →  сайт (регистрация, скачивания)
-Другой VPS      →  global backend (AI + лицензии)
-Каждый офис     →  local backend + desktop/admin на ПК
+Beget VPS   →  global backend + website (один сервер, docker-compose.vps.yml)
+Каждый офис →  local backend + desktop/admin на ПК (docker-compose.local.yml)
 ```
 
-> **Важно:** Beget **shared hosting** не подходит — FastAPI требует постоянный процесс (uvicorn), а PostgreSQL на базовом shared не предоставляется. Нужен именно **Beget VPS** (Linux, от ~300 руб/мес).
+> **Важно:** Beget **shared hosting** не подходит — FastAPI требует постоянный процесс (uvicorn), а PostgreSQL на базовом shared не предоставляется. Нужен **Beget VPS** (Linux, от ~300 руб/мес). Global backend и сайт живут на одном VPS.
 
 ---
 
-#### Шаг 1 — Глобальный бэкенд на VPS
+#### Шаг 1 — Beget VPS: global backend + сайт
 
-Этот сервис — центральный AI-шлюз. Запускается один раз, доступен всем остальным компонентам через интернет.
+Один сервер держит и AI-шлюз, и публичный сайт. Внутри Docker-сети они общаются напрямую, наружу торчат порты 3002 (API) и 3003 (сайт).
 
-**Требования на VPS:** Docker, Docker Compose, открытый порт `3002`
+**Требования:** Docker, Docker Compose, Node.js (для сборки фронтенда), открытые порты `3002` и `3003`
 
-**1.1. Скопировать файлы на VPS**
+**1.1. Загрузить проект на VPS**
 
-```bash
-# на своём компьютере
-scp -r global-backend/ backend/init.sql docker-compose.vps.yml user@VPS-IP:~/sales/
-```
-
-Или через git:
 ```bash
 git clone <repo> ~/sales && cd ~/sales
 ```
 
-**1.2. Создать .env**
+Или через scp:
+```bash
+scp -r . user@BEGET-IP:~/sales/
+```
+
+**1.2. Собрать фронтенд сайта** (один раз перед запуском)
+
+```bash
+cd website/frontend && npm install && npm run build && cd ../..
+```
+
+**1.3. Создать .env для global backend**
 
 ```bash
 cp global-backend/.env.example global-backend/.env
@@ -242,58 +242,11 @@ nano global-backend/.env
 ```env
 PORT=3002
 GROQ_API_KEY=gsk_...                  # https://console.groq.com → API Keys
-ADMIN_SECRET=придумай-сложный-пароль  # используется во всех остальных компонентах
+ADMIN_SECRET=придумай-сложный-пароль  # запомни — нужен во всех остальных .env
 REQUIRE_LICENSE=true                  # включить проверку лицензий в продакшене
-DATABASE_URL=postgresql://sales:sales_pass@postgres:5432/sales_agent
 ```
 
-**1.3. Запустить**
-
-```bash
-docker compose -f docker-compose.vps.yml up -d --build
-```
-
-**1.4. Открыть порт в файрволе VPS**
-
-```bash
-# UFW (Ubuntu)
-ufw allow 3002/tcp
-
-# firewalld (CentOS/RHEL)
-firewall-cmd --permanent --add-port=3002/tcp && firewall-cmd --reload
-```
-
-**1.5. Проверить**
-
-```bash
-curl http://VPS-IP:3002/health
-# → {"status":"ok","groq":true}
-```
-
-> Опционально: настрой nginx как reverse proxy и добавь SSL-сертификат (Let's Encrypt), чтобы использовать `https://api.yourdomain.com` вместо голого IP.
-
----
-
-#### Шаг 2 — Сайт на Beget VPS
-
-Сайт — публичная часть: регистрация пользователей, выдача лицензий, страница скачивания.
-
-**Требования на Beget VPS:** Docker, Docker Compose, Node.js (для сборки фронтенда), открытый порт `3003` (или nginx на 80/443)
-
-**2.1. Собрать фронтенд локально и загрузить на сервер**
-
-```bash
-# на своём компьютере
-cd website/frontend
-npm install
-npm run build   # собирает React в website/backend/static/
-cd ../..
-
-# загрузить на Beget VPS
-scp -r website/ backend/init.sql docker-compose.beget.yml user@BEGET-IP:~/sales/
-```
-
-**2.2. Создать .env**
+**1.4. Создать .env для сайта**
 
 ```bash
 cp website/backend/.env.example website/backend/.env
@@ -302,45 +255,56 @@ nano website/backend/.env
 
 ```env
 PORT=3003
-DATABASE_URL=postgresql://sales:sales_pass@postgres:5432/sales_agent
+# Внутри Docker-сети — не меняй эту строку
+GLOBAL_BACKEND_URL=http://global-backend:3002
 
-# Адрес глобального бэкенда (VPS из Шага 1)
-GLOBAL_BACKEND_URL=http://VPS-IP:3002
-
-# Тот же пароль, что ADMIN_SECRET в global-backend/.env
+# Тот же пароль, что ADMIN_SECRET выше
 GLOBAL_ADMIN_SECRET=придумай-сложный-пароль
 
 # Логин/пароль для страницы /admin на сайте
 SITE_ADMIN_USER=admin
 SITE_ADMIN_PASS=сильный-пароль-для-владельца
 
-# Прямые ссылки на файлы для скачивания (куда ты выложишь сборки)
+# Ссылки на файлы для скачивания (после того как выложишь сборки)
 DOWNLOAD_DESKTOP=https://files.yourdomain.com/desktop-setup.exe
 DOWNLOAD_ADMIN=https://files.yourdomain.com/admin-setup.exe
 DOWNLOAD_BACKEND=https://files.yourdomain.com/docker-compose.local.yml
 DOWNLOAD_ANDROID=https://files.yourdomain.com/sales-analyzer.apk
 ```
 
-**2.3. Запустить**
+**1.5. Запустить**
 
 ```bash
-docker compose -f docker-compose.beget.yml up -d --build
+docker compose -f docker-compose.vps.yml up -d --build
 ```
 
-**2.4. Открыть порт**
+**1.6. Открыть порты в файрволе**
 
 ```bash
-ufw allow 3003/tcp
+# UFW (Ubuntu — стандарт на Beget VPS)
+ufw allow 3002/tcp   # global backend API (нужен local-backend в офисах)
+ufw allow 3003/tcp   # сайт
+
+# firewalld (CentOS/RHEL)
+firewall-cmd --permanent --add-port=3002/tcp --add-port=3003/tcp && firewall-cmd --reload
 ```
 
-**2.5. Проверить**
+**1.7. Проверить**
+
+```bash
+curl http://BEGET-IP:3002/health
+# → {"status":"ok","groq":true}
+```
 
 Открой в браузере `http://BEGET-IP:3003` — должна появиться страница регистрации.
 
-**2.6. (Рекомендуется) Nginx + SSL**
+**1.8. (Рекомендуется) Nginx + SSL для сайта**
 
-Установи nginx и certbot, создай конфиг:
+```bash
+apt install nginx certbot python3-certbot-nginx
+```
 
+`/etc/nginx/sites-available/sales`:
 ```nginx
 server {
     listen 80;
@@ -364,26 +328,33 @@ server {
 ```
 
 ```bash
+ln -s /etc/nginx/sites-available/sales /etc/nginx/sites-enabled/
 certbot --nginx -d yourdomain.com
+nginx -s reload
 ```
 
 ---
 
-#### Шаг 3 — Локальный бэкенд в локальной сети
+#### Шаг 2 — Локальный бэкенд в локальной сети
 
-Один экземпляр на офис (или на каждый изолированный сегмент сети). Хранит звонки, контакты, менеджеров. Получает AI-анализ от глобального бэкенда.
+Один экземпляр на офис (или на каждый изолированный сегмент сети). Хранит звонки, контакты, менеджеров. Получает AI-анализ от глобального бэкенда на Beget VPS.
 
-**Требования на LAN-машине:** Docker, Docker Compose, Python 3.12 (если без Docker), ffmpeg
+**Требования на LAN-машине:** Docker, Docker Compose, открытый порт `3001` в локальной сети (не в интернете)
 
-**3.1. Скопировать файлы**
+**2.1. Скопировать файлы**
 
-```bash
-# на LAN-машине (Windows — через PowerShell или Git Bash)
+```powershell
+# Windows — PowerShell или Git Bash
 git clone <repo> C:\sales-agent
 # или скопировать папки backend/ и docker-compose.local.yml вручную
 ```
 
-**3.2. Создать .env**
+```bash
+# Linux
+git clone <repo> ~/sales-agent
+```
+
+**2.2. Создать .env**
 
 ```bash
 cp backend/.env.example backend/.env
@@ -395,18 +366,18 @@ cp backend/.env.example backend/.env
 PORT=3001
 DATABASE_URL=postgresql://sales:sales_pass@postgres:5432/sales_agent
 
-# Адрес глобального бэкенда (VPS из Шага 1)
-GLOBAL_BACKEND_URL=http://VPS-IP:3002
+# Адрес глобального бэкенда на Beget VPS (из Шага 1)
+GLOBAL_BACKEND_URL=http://BEGET-IP:3002
 
 # Тот же пароль, что ADMIN_SECRET в global-backend/.env
 GLOBAL_ADMIN_SECRET=придумай-сложный-пароль
 
-# Лицензионный ключ — получить на сайте после регистрации (Шаг 2)
+# Лицензионный ключ — получить на сайте после регистрации (Шаг 1)
 # Оставь пустым для dev-режима без лицензии
 LICENSE_KEY=SALES-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
 # FreePBX / SIP (если используется IP-телефония)
-FREEPBX_HOST=192.168.1.100    # IP АТС
+FREEPBX_HOST=192.168.1.100    # IP АТС в локальной сети
 FREEPBX_DOMAIN=office.local
 FREEPBX_EXTENSION=1000
 FREEPBX_PASSWORD=sip-password
@@ -416,20 +387,20 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
-**3.3. Запустить**
+**2.3. Запустить**
 
 ```bash
 docker compose -f docker-compose.local.yml up -d --build
 ```
 
-**3.4. Проверить**
+**2.4. Проверить**
 
 ```bash
 curl http://localhost:3001/api/health
 # → {"status":"ok","database":"connected","license":"..."}
 ```
 
-**3.5. Узнать LAN IP машины**
+**2.5. Узнать LAN IP этой машины**
 
 ```powershell
 # Windows
@@ -442,13 +413,13 @@ ipconfig | findstr "IPv4"
 ip addr show | grep "inet "
 ```
 
-Запомни этот IP — он понадобится в Шаге 4 для настройки Electron-приложений.
+Запомни этот IP — он понадобится в Шаге 3 для Desktop/Admin приложений и Android.
 
 ---
 
-#### Шаг 4 — Desktop и Admin приложения
+#### Шаг 3 — Desktop, Admin и Android приложения
 
-Electron-приложения работают на каждом компьютере менеджера / администратора. Им нужно знать адрес локального бэкенда из Шага 3.
+Electron-приложения работают на каждом компьютере менеджера / администратора. Им нужно знать адрес локального бэкенда из Шага 2.
 
 ##### Запуск в режиме разработки (с нужным бэкендом)
 
@@ -493,7 +464,18 @@ BACKEND_URL=http://192.168.1.50:3001 npm run build
 
 ##### Вход в Admin App
 
-При первом запуске Admin App потребует авторизацию — используй email и пароль с сайта (Шаг 2). Admin App вызывает `POST /api/auth/verify` на website backend для проверки credentials.
+При первом запуске Admin App потребует авторизацию — используй email и пароль с сайта (Шаг 1). Admin App вызывает `POST /api/auth/verify` на website backend для проверки credentials.
+
+##### Android в локальной сети
+
+Android-приложение подключается к local-backend по WebSocket точно так же, как Desktop App. При первом запуске приложение показывает экран логина с полем адреса бэкенда:
+
+1. Введи адрес local-backend: `ws://192.168.1.50:3001` (LAN IP из Шага 2)
+2. Введи логин и пароль менеджера (создаются в Admin App)
+3. Адрес сохраняется — при следующих запусках восстанавливается автоматически
+4. Изменить адрес потом можно в вкладке **Настройки** → поле URL → кнопка **Сохранить**
+
+**Условие:** телефон должен быть в той же Wi-Fi сети, что и машина с local-backend.
 
 ---
 

@@ -13,7 +13,6 @@
     "docker:down":     "docker compose down",
     "docker:logs":     "docker compose logs -f",
     "docker:vps":      "docker compose -f docker-compose.vps.yml up -d --build",
-    "docker:beget":    "docker compose -f docker-compose.beget.yml up -d --build",
     "docker:local":    "docker compose -f docker-compose.local.yml up -d --build",
     "dev:website":     "cd website/frontend && npm run dev",
     "install:website": "cd website/frontend && npm install",
