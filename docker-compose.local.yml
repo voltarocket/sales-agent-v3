@@ -1,0 +1,47 @@
+# Local network deployment — one instance per office/location
+# Usage: docker compose -f docker-compose.local.yml up -d --build
+#
+# Required .env files:
+#   backend/.env  — set GLOBAL_BACKEND_URL to your VPS address,
+#                   GLOBAL_ADMIN_SECRET, LICENSE_KEY
+#
+# Desktop and Admin Electron apps connect to this machine:
+#   BACKEND_URL=http://<this-machine-LAN-ip>:3001
+#   BACKEND_WS=ws://<this-machine-LAN-ip>:3001
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       sales_agent
+      POSTGRES_USER:     sales
+      POSTGRES_PASSWORD: sales_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sales -d sales_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  local-backend:
+    build: ./backend
+    restart: unless-stopped
+    ports:
+      - "3001:3001"
+    env_file:
+      - ./backend/.env
+    environment:
+      DATABASE_URL: postgresql://sales:sales_pass@postgres:5432/sales_agent
+    volumes:
+      - local_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  local_uploads:

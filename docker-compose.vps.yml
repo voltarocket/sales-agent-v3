@@ -1,0 +1,45 @@
+# VPS deployment — global backend + AI gateway + licensing
+# Usage: docker compose -f docker-compose.vps.yml up -d --build
+#
+# Required .env files:
+#   global-backend/.env  — set GROQ_API_KEY, ADMIN_SECRET
+#
+# After first start, open port 3002 in your VPS firewall.
+# The website on Beget must point GLOBAL_BACKEND_URL to this VPS.
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       sales_agent
+      POSTGRES_USER:     sales
+      POSTGRES_PASSWORD: sales_pass
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sales -d sales_agent"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  global-backend:
+    build: ./global-backend
+    restart: unless-stopped
+    ports:
+      - "3002:3002"
+    env_file:
+      - ./global-backend/.env
+    environment:
+      DATABASE_URL: postgresql://sales:sales_pass@postgres:5432/sales_agent
+    volumes:
+      - global_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  global_uploads:
