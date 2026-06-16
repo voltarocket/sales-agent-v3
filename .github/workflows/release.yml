@@ -42,54 +42,22 @@ jobs:
 
       # ── Build Desktop App ───────────────────────────────────────────────────
       - name: Install & build Desktop App
-        shell: pwsh
         working-directory: desktop
         run: |
-          npm install 2>&1 | Tee-Object -Variable npmOut
-          $buildOut = npx electron-builder --win --x64 2>&1
-          $buildOut | Write-Output
-          if ($LASTEXITCODE -ne 0) {
-            "## ❌ Desktop build failed`n``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            $buildOut | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            "``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            exit 1
-          }
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm ci
+          npx electron-builder --win --x64 --publish never
 
-      # ── Build Admin App ─────────────────────────────────────────────────────
       - name: Install & build Admin App
-        shell: pwsh
         working-directory: admin
         run: |
-          npm install 2>&1 | Write-Output
-          $buildOut = npx electron-builder --win --x64 2>&1
-          $buildOut | Write-Output
-          if ($LASTEXITCODE -ne 0) {
-            "## ❌ Admin build failed`n``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            $buildOut | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            "``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            exit 1
-          }
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm ci
+          npx electron-builder --win --x64 --publish never
 
-      # ── Build Backend Installer ─────────────────────────────────────────────
       - name: Install & build Backend Installer
-        shell: pwsh
         working-directory: installer
         run: |
-          npm install 2>&1 | Write-Output
-          $buildOut = npx electron-builder --win --x64 2>&1
-          $buildOut | Write-Output
-          if ($LASTEXITCODE -ne 0) {
-            "## ❌ Installer build failed`n``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            $buildOut | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            "``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
-            exit 1
-          }
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          npm ci
+          npx electron-builder --win --x64 --publish never
 
       # ── Rename artifacts to stable names ────────────────────────────────────
       - name: Rename artifacts
