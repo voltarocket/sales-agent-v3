@@ -5,7 +5,7 @@ import fetch from "node-fetch";
 import FormData from "form-data";
 import fs from "fs";
 import path from "path";
-import { spawnSync, execSync } from "child_process";
+import { spawnSync, execSync, spawn } from "child_process";
 import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { createServer } from "http";
@@ -203,26 +203,31 @@ async function processSession(session, duration) {
 
     const tmpPcm = path.join("uploads", `ws_${Date.now()}.pcm`);
     const tmpWav = tmpPcm + ".wav";
-    fs.writeFileSync(tmpPcm, audioBuffer);
+    await fs.promises.writeFile(tmpPcm, audioBuffer);
 
     try {
-      const r = spawnSync(FFMPEG, [
-        "-y", "-f", "s16le", "-ar", "16000", "-ac", "1",
-        "-i", tmpPcm, tmpWav,
-      ], { encoding: "utf8", timeout: 30000 });
+      const ffmpegOk = await new Promise((resolve) => {
+        const proc = spawn(FFMPEG, [
+          "-y", "-f", "s16le", "-ar", "16000", "-ac", "1",
+          "-i", tmpPcm, tmpWav,
+        ]);
+        const timer = setTimeout(() => { proc.kill(); resolve(false); }, 30000);
+        proc.on("close", (code) => { clearTimeout(timer); resolve(code === 0); });
+        proc.on("error", () => { clearTimeout(timer); resolve(false); });
+      });
 
-      if (r.status === 0) {
+      if (ffmpegOk) {
         const result = await sendToGlobalBackend(tmpWav, session.managerName, session.phone);
         transcript = result.transcript || "";
         analysis   = result.analysis   || analysis;
-        trackUsage(GLOBAL_URL); // async, non-blocking
+        trackUsage(GLOBAL_URL).catch(e => console.warn("[trackUsage]", e.message));
       } else {
-        console.warn("[WS] ffmpeg convert failed:", r.stderr);
+        console.warn("[WS] ffmpeg convert failed");
       }
 
-      if (fs.existsSync(tmpWav)) fs.unlinkSync(tmpWav);
+      await fs.promises.unlink(tmpWav).catch(() => {});
     } finally {
-      if (fs.existsSync(tmpPcm)) fs.unlinkSync(tmpPcm);
+      await fs.promises.unlink(tmpPcm).catch(() => {});
     }
   }
 
@@ -495,7 +500,7 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 // ═══════════════════════════════════════════════════════════
 // ANALYSIS  (proxy to global backend — text only path)
 // ═══════════════════════════════════════════════════════════
-app.post("/api/analyze", async (req, res) => {
+app.post("/api/analyze", express.json({ limit: "1mb" }), async (req, res) => {
   const { managerName = "Менеджер", transcript } = req.body;
   if (!transcript) return res.status(400).json({ error: "transcript required" });
 
@@ -754,12 +759,12 @@ app.put("/api/settings/:key", async (req, res) => {
 // Bulk update (for Electron apps compatibility)
 app.put("/api/settings", async (req, res) => {
   const entries = Object.entries(req.body || {});
-  for (const [key, value] of entries) {
-    await query(
+  await Promise.all(entries.map(([key, value]) =>
+    query(
       "INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2",
       [key, String(value)]
-    );
-  }
+    )
+  ));
   res.json({ ok: true });
 });
 

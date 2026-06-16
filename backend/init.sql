@@ -104,6 +104,13 @@ CREATE TABLE IF NOT EXISTS website_users (
   is_active     BOOLEAN      DEFAULT TRUE
 );
 
+-- Indexes for high-load query performance
+CREATE INDEX IF NOT EXISTS idx_calls_manager_id  ON calls(manager_id);
+CREATE INDEX IF NOT EXISTS idx_calls_created_at  ON calls(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_calls_contact_id  ON calls(contact_id);
+CREATE INDEX IF NOT EXISTS idx_contacts_phone    ON contacts(phone);
+CREATE INDEX IF NOT EXISTS idx_managers_username ON managers(username);
+
 -- Default seed data
 INSERT INTO managers (name, username, password_hash, avatar, color)
   VALUES ('Менеджер', 'manager', encode(sha256('12345'::bytea), 'hex'), 'МН', '#6366f1')

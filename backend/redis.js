@@ -6,8 +6,21 @@ const timers  = new Map(); // key → timeout handle
 
 function _ttlMs(seconds) { return seconds * 1000; }
 
+const MAX_STORE_SIZE = 10_000;
+
+function _evictOldest() {
+  const iter = store.keys();
+  const oldest = iter.next().value;
+  if (oldest) {
+    if (timers.has(oldest)) clearTimeout(timers.get(oldest));
+    store.delete(oldest);
+    timers.delete(oldest);
+  }
+}
+
 function _set(key, value, ttlSec) {
   if (timers.has(key)) clearTimeout(timers.get(key));
+  if (!store.has(key) && store.size >= MAX_STORE_SIZE) _evictOldest();
   const expiresAt = ttlSec ? Date.now() + _ttlMs(ttlSec) : null;
   store.set(key, { value, expiresAt });
   if (ttlSec) {
