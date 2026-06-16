@@ -10,6 +10,7 @@ import { fileURLToPath } from "url";
 import dotenv from "dotenv";
 import { createServer } from "http";
 import { WebSocketServer } from "ws";
+import crypto from "crypto";
 
 import { pool, query, waitForDb } from "./db.js";
 import { redis, setJob, getJob } from "./redis.js";
@@ -299,6 +300,82 @@ app.get("/api/health", async (_, res) => {
 });
 
 // ═══════════════════════════════════════════════════════════
+// AUTH API
+// ═══════════════════════════════════════════════════════════
+const managerSessions = new Map(); // token → managerId
+const adminSessions   = new Set(); // token
+
+function hashPw(pw) {
+  return crypto.createHash("sha256").update(pw, "utf8").digest("hex");
+}
+function genToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
+
+// Manager login
+app.post("/api/auth/login", async (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.json({ error: "Логин и пароль обязательны" });
+  const { rows: [mgr] } = await query(
+    "SELECT * FROM managers WHERE username=$1 AND password_hash=$2",
+    [username.trim(), hashPw(password)]
+  );
+  if (!mgr) return res.json({ error: "Неверный логин или пароль" });
+  const token = genToken();
+  managerSessions.set(token, mgr.id);
+  const { password_hash, ...safe } = mgr;
+  res.json({ ok: true, token, id: mgr.id, name: mgr.name, ...safe });
+});
+
+// Manager whoami
+app.get("/api/auth/me", async (req, res) => {
+  const token = req.headers["x-auth-token"];
+  const mid   = managerSessions.get(token);
+  if (!mid) return res.status(401).json({ error: "Unauthorized" });
+  const { rows: [mgr] } = await query("SELECT * FROM managers WHERE id=$1", [mid]);
+  if (!mgr) return res.status(401).json({ error: "Unauthorized" });
+  const { password_hash, ...safe } = mgr;
+  res.json(safe);
+});
+
+// Admin login
+app.post("/api/auth/admin", async (req, res) => {
+  const { username, password } = req.body || {};
+  const { rows: [adm] } = await query("SELECT * FROM admin_credentials LIMIT 1");
+  if (!adm) return res.json({ error: "Неверный логин или пароль" });
+  if ((username || "").trim() !== adm.username) return res.json({ error: "Неверный логин или пароль" });
+  if (hashPw(password || "") !== adm.password_hash) return res.json({ error: "Неверный логин или пароль" });
+  const token = genToken();
+  adminSessions.add(token);
+  res.json({ ok: true, token });
+});
+
+// Change admin credentials
+app.put("/api/auth/admin", async (req, res) => {
+  const token = req.headers["x-auth-token"];
+  if (!adminSessions.has(token)) return res.status(403).json({ error: "Требуется доступ администратора" });
+  const { username, password } = req.body || {};
+  if (!(username || "").trim()) return res.json({ error: "Логин не может быть пустым" });
+  if (password && password.length < 4) return res.json({ error: "Пароль минимум 4 символа" });
+  const { rows: [adm] } = await query("SELECT id FROM admin_credentials LIMIT 1");
+  if (!adm) return res.json({ error: "Admin not found" });
+  const updates = ["username=$1"];
+  const vals    = [username.trim()];
+  if (password) { updates.push(`password_hash=$${vals.length + 1}`); vals.push(hashPw(password)); }
+  vals.push(adm.id);
+  await query(`UPDATE admin_credentials SET ${updates.join(", ")} WHERE id=$${vals.length}`, vals);
+  res.json({ ok: true });
+});
+
+// Logout
+app.post("/api/auth/logout", (req, res) => {
+  const token = req.headers["x-auth-token"];
+  managerSessions.delete(token);
+  adminSessions.delete(token);
+  res.json({ ok: true });
+});
+
+// ═══════════════════════════════════════════════════════════
 // LICENSE STATUS + ACTIVATION
 // ═══════════════════════════════════════════════════════════
 app.get("/api/license/status", (_, res) => {
@@ -538,27 +615,55 @@ app.delete("/api/contacts/:id", async (req, res) => {
 // MANAGERS API
 // ═══════════════════════════════════════════════════════════
 app.get("/api/managers", async (_, res) => {
-  const { rows } = await query("SELECT * FROM managers ORDER BY id");
+  const { rows } = await query(
+    "SELECT id, name, username, avatar, color, violations, calls_count, avg_score FROM managers ORDER BY id"
+  );
+  res.json(rows);
+});
+
+// GET /api/managers/:id/calls
+app.get("/api/managers/:id/calls", async (req, res) => {
+  const { rows } = await query(
+    "SELECT * FROM calls WHERE manager_id=$1 ORDER BY created_at DESC",
+    [+req.params.id]
+  );
   res.json(rows);
 });
 
 app.post("/api/managers", async (req, res) => {
-  const { name, color } = req.body;
+  const { name, username, password, color } = req.body;
+  if (!(name     || "").trim()) return res.json({ error: "Имя обязательно" });
+  if (!(username || "").trim()) return res.json({ error: "Логин обязателен" });
+  if (!password)                return res.json({ error: "Пароль обязателен" });
+  const { rows: [dup] } = await query("SELECT id FROM managers WHERE username=$1", [username.trim()]);
+  if (dup) return res.json({ error: "Логин уже занят" });
   const avatar = name.trim().split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
   const { rows: [mgr] } = await query(
-    "INSERT INTO managers (name, avatar, color) VALUES ($1,$2,$3) RETURNING *",
-    [name.trim(), avatar, color || "#6366f1"]
+    "INSERT INTO managers (name, username, password_hash, avatar, color) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+    [name.trim(), username.trim(), hashPw(password), avatar, color || "#6366f1"]
   );
   res.json({ ok: true, id: mgr.id });
 });
 
 app.put("/api/managers/:id", async (req, res) => {
-  const { name, color, avatar } = req.body;
+  const { name, username, password, color } = req.body;
   const { rows: [existing] } = await query("SELECT * FROM managers WHERE id=$1", [+req.params.id]);
   if (!existing) return res.status(404).json({ error: "Not found" });
+  if (username) {
+    const { rows: [dup] } = await query(
+      "SELECT id FROM managers WHERE username=$1 AND id<>$2", [username.trim(), existing.id]
+    );
+    if (dup) return res.json({ error: "Логин уже занят" });
+  }
+  const newName   = (name   || "").trim() || existing.name;
+  const newAvatar = newName.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
   await query(
-    "UPDATE managers SET name=$1, color=$2, avatar=$3 WHERE id=$4",
-    [name ?? existing.name, color ?? existing.color, avatar ?? existing.avatar, existing.id]
+    `UPDATE managers SET name=$1, avatar=$2, color=$3, username=$4
+      ${password ? ", password_hash=$6" : ""}
+     WHERE id=$5`,
+    password
+      ? [newName, newAvatar, color ?? existing.color, username?.trim() ?? existing.username, existing.id, hashPw(password)]
+      : [newName, newAvatar, color ?? existing.color, username?.trim() ?? existing.username, existing.id]
   );
   res.json({ ok: true });
 });
@@ -610,6 +715,18 @@ app.put("/api/settings/:key", async (req, res) => {
   res.json({ ok: true });
 });
 
+// Bulk update (for Electron apps compatibility)
+app.put("/api/settings", async (req, res) => {
+  const entries = Object.entries(req.body || {});
+  for (const [key, value] of entries) {
+    await query(
+      "INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2",
+      [key, String(value)]
+    );
+  }
+  res.json({ ok: true });
+});
+
 // ═══════════════════════════════════════════════════════════
 // NOTIFICATIONS
 // ═══════════════════════════════════════════════════════════
@@ -632,6 +749,33 @@ app.post("/api/notify", async (req, res) => {
   }
   console.log(`[NOTIFY] ${managerName}: ${violations}/${threshold}`);
   res.json({ ok: true, mode: "console" });
+});
+
+// Check violations threshold and notify if needed
+app.post("/api/notify-check", async (req, res) => {
+  const { managerId } = req.body || {};
+  if (!managerId) return res.json({ ok: true });
+  try {
+    const { rows: [mgr] } = await query("SELECT * FROM managers WHERE id=$1", [+managerId]);
+    if (!mgr) return res.json({ ok: true });
+    const { rows: [setting] } = await query("SELECT value FROM settings WHERE key='violations_threshold'");
+    const threshold = Number(setting?.value) || 5;
+    if (mgr.violations > 0 && mgr.violations % threshold === 0) {
+      // Send notification
+      if (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID) {
+        await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/sendMessage`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            chat_id: process.env.TELEGRAM_CHAT_ID,
+            text: `⚠️ *Sales Alert*\nМенеджер *${mgr.name}*: *${mgr.violations}/${threshold}* нарушений\n🕐 ${new Date().toLocaleString("ru")}`,
+            parse_mode: "Markdown",
+          }),
+        }).catch(() => {});
+      }
+    }
+  } catch (_) {}
+  res.json({ ok: true });
 });
 
 // ═══════════════════════════════════════════════════════════

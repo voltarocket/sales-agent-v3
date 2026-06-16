@@ -1,11 +1,19 @@
 CREATE TABLE IF NOT EXISTS managers (
-  id          SERIAL PRIMARY KEY,
-  name        VARCHAR(255) NOT NULL,
-  avatar      VARCHAR(10),
-  color       VARCHAR(20)  DEFAULT '#6366f1',
-  violations  INTEGER      DEFAULT 0,
-  calls_count INTEGER      DEFAULT 0,
-  avg_score   NUMERIC(5,2)
+  id            SERIAL PRIMARY KEY,
+  name          VARCHAR(255) NOT NULL,
+  username      VARCHAR(255) UNIQUE,
+  password_hash VARCHAR(64),
+  avatar        VARCHAR(10),
+  color         VARCHAR(20)  DEFAULT '#6366f1',
+  violations    INTEGER      DEFAULT 0,
+  calls_count   INTEGER      DEFAULT 0,
+  avg_score     NUMERIC(5,2)
+);
+
+CREATE TABLE IF NOT EXISTS admin_credentials (
+  id            SERIAL PRIMARY KEY,
+  username      VARCHAR(255) NOT NULL DEFAULT 'admin',
+  password_hash VARCHAR(64)  NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS contacts (
@@ -102,9 +110,13 @@ CREATE TABLE IF NOT EXISTS website_users (
 );
 
 -- Default seed data
-INSERT INTO managers (name, avatar, color)
-  VALUES ('Менеджер', 'МН', '#6366f1')
+INSERT INTO managers (name, username, password_hash, avatar, color)
+  VALUES ('Менеджер', 'manager', encode(sha256('12345'::bytea), 'hex'), 'МН', '#6366f1')
   ON CONFLICT DO NOTHING;
+
+INSERT INTO admin_credentials (username, password_hash)
+  SELECT 'admin', encode(sha256('admin'::bytea), 'hex')
+  WHERE NOT EXISTS (SELECT 1 FROM admin_credentials);
 
 INSERT INTO settings (key, value)
   VALUES ('violations_threshold', '5')
