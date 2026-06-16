@@ -36,6 +36,8 @@ services:
       - ./backend/.env
     environment:
       DATABASE_URL: postgresql://sales:sales_pass@postgres:5432/sales_agent
+      # Set to your website address so admin login works via website credentials
+      # WEBSITE_URL: https://yourdomain.com
     volumes:
       - local_uploads:/app/uploads
     depends_on:

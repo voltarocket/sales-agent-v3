@@ -55,7 +55,8 @@ const FFMPEG = findFfmpeg();
 // ═══════════════════════════════════════════════════════════
 // GLOBAL BACKEND — AI gateway
 // ═══════════════════════════════════════════════════════════
-const GLOBAL_URL = process.env.GLOBAL_BACKEND_URL || "http://localhost:3002";
+const GLOBAL_URL   = process.env.GLOBAL_BACKEND_URL || "http://localhost:3002";
+const WEBSITE_URL  = process.env.WEBSITE_URL        || "http://localhost:3003";
 
 async function sendToGlobalBackend(wavPath, managerName, phone) {
   const form = new FormData();
@@ -338,33 +339,40 @@ app.get("/api/auth/me", async (req, res) => {
   res.json(safe);
 });
 
-// Admin login
+// Admin login — via website credentials (email + password)
 app.post("/api/auth/admin", async (req, res) => {
-  const { username, password } = req.body || {};
-  const { rows: [adm] } = await query("SELECT * FROM admin_credentials LIMIT 1");
-  if (!adm) return res.json({ error: "Неверный логин или пароль" });
-  if ((username || "").trim() !== adm.username) return res.json({ error: "Неверный логин или пароль" });
-  if (hashPw(password || "") !== adm.password_hash) return res.json({ error: "Неверный логин или пароль" });
+  const { email, password } = req.body || {};
+  if (!email || !password) return res.json({ error: "Email и пароль обязательны" });
+
+  let websiteUser = null;
+  try {
+    const r = await fetch(`${WEBSITE_URL}/api/auth/verify`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ email: email.trim().toLowerCase(), password }),
+      signal:  AbortSignal.timeout(8000),
+    });
+    const data = await r.json();
+    if (!data.ok) return res.json({ error: data.error || "Неверный email или пароль" });
+    websiteUser = data.user;
+  } catch (e) {
+    return res.json({ error: "Сайт недоступен. Проверьте подключение." });
+  }
+
+  // Auto-activate license if the account has one and it's not yet set
+  const licenseKey = websiteUser.license_key;
+  if (licenseKey && !licenseState.valid) {
+    try {
+      await activateLicense(GLOBAL_URL, licenseKey, query);
+      console.log(`[LICENSE] auto-activated from website account: ${licenseKey}`);
+    } catch (e) {
+      console.warn("[LICENSE] auto-activation failed:", e.message);
+    }
+  }
+
   const token = genToken();
   adminSessions.add(token);
-  res.json({ ok: true, token });
-});
-
-// Change admin credentials
-app.put("/api/auth/admin", async (req, res) => {
-  const token = req.headers["x-auth-token"];
-  if (!adminSessions.has(token)) return res.status(403).json({ error: "Требуется доступ администратора" });
-  const { username, password } = req.body || {};
-  if (!(username || "").trim()) return res.json({ error: "Логин не может быть пустым" });
-  if (password && password.length < 4) return res.json({ error: "Пароль минимум 4 символа" });
-  const { rows: [adm] } = await query("SELECT id FROM admin_credentials LIMIT 1");
-  if (!adm) return res.json({ error: "Admin not found" });
-  const updates = ["username=$1"];
-  const vals    = [username.trim()];
-  if (password) { updates.push(`password_hash=$${vals.length + 1}`); vals.push(hashPw(password)); }
-  vals.push(adm.id);
-  await query(`UPDATE admin_credentials SET ${updates.join(", ")} WHERE id=$${vals.length}`, vals);
-  res.json({ ok: true });
+  res.json({ ok: true, token, email: websiteUser.email, name: websiteUser.name, license_key: licenseKey });
 });
 
 // Logout
@@ -387,16 +395,7 @@ app.get("/api/license/status", (_, res) => {
   });
 });
 
-app.post("/api/license/activate", async (req, res) => {
-  const { key } = req.body;
-  if (!key?.trim()) return res.status(400).json({ error: "key required" });
-  try {
-    const result = await activateLicense(GLOBAL_URL, key.trim(), query);
-    res.json({ ok: true, ...result });
-  } catch (e) {
-    res.status(400).json({ error: e.message });
-  }
-});
+// License is activated automatically on admin login via website credentials.
 
 // ═══════════════════════════════════════════════════════════
 // SIP CONFIG
