@@ -93,7 +93,7 @@ class AudioCaptureService : Service() {
             Intent(this, AudioCaptureService::class.java).apply { action = ACTION_STOP },
             PendingIntent.FLAG_IMMUTABLE)
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Sales Analyzer")
+            .setContentTitle("Diallog")
             .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .addAction(android.R.drawable.ic_media_pause, "Стоп", stop)

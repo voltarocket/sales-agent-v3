@@ -17,7 +17,7 @@
     <application
         android:name=".SalesApp"
         android:allowBackup="true"
-        android:label="Sales Analyzer"
+        android:label="Diallog"
         android:icon="@android:drawable/sym_def_app_icon"
         android:theme="@style/Theme.SalesAnalyzer"
         android:supportsRtl="true"

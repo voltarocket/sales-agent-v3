@@ -148,7 +148,7 @@ class MainActivity : ComponentActivity() {
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Text(
-                    "Sales Analyzer", color = C.text, fontWeight = FontWeight.Bold,
+                    "Diallog", color = C.text, fontWeight = FontWeight.Bold,
                     fontSize = 16.sp, modifier = Modifier.weight(1f)
                 )
                 if (managerName.isNotEmpty()) {
@@ -243,7 +243,7 @@ class MainActivity : ComponentActivity() {
             verticalArrangement = Arrangement.Center,
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Text("Sales Analyzer", color = C.text,
+            Text("Diallog", color = C.text,
                 fontSize = 22.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text("Вход в систему", color = C.text2, fontSize = 14.sp)
@@ -502,7 +502,7 @@ class MainActivity : ComponentActivity() {
                     Text("Телефон по умолчанию", color = C.text2, fontSize = 11.sp)
                     Spacer(Modifier.height(8.dp))
                     if (isDefault) {
-                        Text("✓ Sales Analyzer — телефон по умолчанию",
+                        Text("✓ Diallog — телефон по умолчанию",
                             color = C.green, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
                         Spacer(Modifier.height(4.dp))
                         Text("Все звонки записываются автоматически",

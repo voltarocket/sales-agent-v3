@@ -27,7 +27,7 @@ class SalesApp : Application() {
                 "SalesAnalyzerAccount"
             )
 
-            val phoneAccount = PhoneAccount.builder(handle, "Sales Analyzer")
+            val phoneAccount = PhoneAccount.builder(handle, "Diallog")
                 .setCapabilities(
                     PhoneAccount.CAPABILITY_CALL_PROVIDER or
                     PhoneAccount.CAPABILITY_SUPPORTS_VOICE_CALLING_INDICATIONS
