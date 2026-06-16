@@ -16,39 +16,46 @@ jobs:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Node.js ─────────────────────────────────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22"
+        env:
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Build Desktop App ───────────────────────────────────────────────────
       - name: Install & build Desktop App
         working-directory: desktop
         run: |
           npm install
-          npm run build
+          npx electron-builder --win --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Build Admin App ─────────────────────────────────────────────────────
       - name: Install & build Admin App
         working-directory: admin
         run: |
           npm install
-          npm run build
+          npx electron-builder --win --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Build Backend Installer ─────────────────────────────────────────────
       - name: Install & build Backend Installer
         working-directory: installer
         run: |
           npm install
-          npm run build
+          npx electron-builder --win --x64
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Rename artifacts to stable names ────────────────────────────────────
       - name: Rename artifacts
