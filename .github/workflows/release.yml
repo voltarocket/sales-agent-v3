@@ -27,6 +27,22 @@ jobs:
         env:
           FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
+      # ── Generate app icons (required by electron-builder NSIS) ─────────────
+      - name: Generate icons
+        shell: pwsh
+        run: |
+          Add-Type -AssemblyName System.Drawing
+          $apps = @("desktop", "admin", "installer")
+          foreach ($app in $apps) {
+            New-Item -ItemType Directory -Force "$app\build" | Out-Null
+            $bmp = New-Object System.Drawing.Bitmap 256,256
+            $g   = [System.Drawing.Graphics]::FromImage($bmp)
+            $g.Clear([System.Drawing.Color]::FromArgb(124,58,237))
+            $g.Dispose()
+            $bmp.Save("$app\build\icon.png", [System.Drawing.Imaging.ImageFormat]::Png)
+            $bmp.Dispose()
+          }
+
       # ── Build Desktop App ───────────────────────────────────────────────────
       - name: Install & build Desktop App
         working-directory: desktop
