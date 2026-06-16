@@ -16,16 +16,12 @@ jobs:
       # ── Checkout ────────────────────────────────────────────────────────────
       - name: Checkout
         uses: actions/checkout@v4
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Node.js ─────────────────────────────────────────────────────────────
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-        env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Generate app icons (required by electron-builder NSIS) ─────────────
       - name: Generate icons
@@ -42,82 +38,100 @@ jobs:
             $bmp.Save("$app\build\icon.png", [System.Drawing.Imaging.ImageFormat]::Png)
             $bmp.Dispose()
           }
+          Write-Output "Icons generated OK"
 
       # ── Build Desktop App ───────────────────────────────────────────────────
       - name: Install & build Desktop App
+        shell: pwsh
         working-directory: desktop
         run: |
-          npm install
-          npx electron-builder --win --x64
+          npm install 2>&1 | Tee-Object -Variable npmOut
+          $buildOut = npx electron-builder --win --x64 2>&1
+          $buildOut | Write-Output
+          if ($LASTEXITCODE -ne 0) {
+            "## ❌ Desktop build failed`n``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            $buildOut | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            exit 1
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Build Admin App ─────────────────────────────────────────────────────
       - name: Install & build Admin App
+        shell: pwsh
         working-directory: admin
         run: |
-          npm install
-          npx electron-builder --win --x64
+          npm install 2>&1 | Write-Output
+          $buildOut = npx electron-builder --win --x64 2>&1
+          $buildOut | Write-Output
+          if ($LASTEXITCODE -ne 0) {
+            "## ❌ Admin build failed`n``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            $buildOut | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            exit 1
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Build Backend Installer ─────────────────────────────────────────────
       - name: Install & build Backend Installer
+        shell: pwsh
         working-directory: installer
         run: |
-          npm install
-          npx electron-builder --win --x64
+          npm install 2>&1 | Write-Output
+          $buildOut = npx electron-builder --win --x64 2>&1
+          $buildOut | Write-Output
+          if ($LASTEXITCODE -ne 0) {
+            "## ❌ Installer build failed`n``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            $buildOut | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            "``````" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append
+            exit 1
+          }
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
       # ── Rename artifacts to stable names ────────────────────────────────────
       - name: Rename artifacts
         shell: pwsh
         run: |
-          # Desktop
           $desktop = Get-ChildItem "desktop/dist" -Filter "*.exe" | Where-Object { $_.Name -notlike "*Uninstall*" } | Select-Object -First 1
-          if ($desktop) { Copy-Item $desktop.FullName "SalesAnalyzer-Setup.exe" }
+          if ($desktop) { Copy-Item $desktop.FullName "Diallog-Setup.exe" }
 
-          # Admin
           $admin = Get-ChildItem "admin/dist" -Filter "*.exe" | Where-Object { $_.Name -notlike "*Uninstall*" } | Select-Object -First 1
-          if ($admin) { Copy-Item $admin.FullName "SalesAdmin-Setup.exe" }
+          if ($admin) { Copy-Item $admin.FullName "Diallog-Admin-Setup.exe" }
 
-          # Backend installer
           $backend = Get-ChildItem "installer/dist" -Filter "*.exe" | Where-Object { $_.Name -notlike "*Uninstall*" } | Select-Object -First 1
-          if ($backend) { Copy-Item $backend.FullName "SalesBackend-Installer.exe" }
+          if ($backend) { Copy-Item $backend.FullName "Diallog-Backend-Installer.exe" }
 
-          # List what we have
           Get-ChildItem "*.exe"
 
       # ── Create GitHub Release ────────────────────────────────────────────────
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "Sales Analyzer ${{ github.ref_name }}"
+          name: "Diallog ${{ github.ref_name }}"
           body: |
-            ## Sales Analyzer ${{ github.ref_name }}
+            ## Diallog ${{ github.ref_name }}
 
             ### Что скачать
 
             | Файл | Для кого |
             |------|---------|
-            | **SalesAnalyzer-Setup.exe** | Менеджер — устанавливается на каждый рабочий компьютер |
-            | **SalesAdmin-Setup.exe** | Администратор — панель управления |
-            | **SalesBackend-Installer.exe** | Локальный сервер — один на офис (требует Docker Desktop) |
+            | **Diallog-Setup.exe** | Менеджер — устанавливается на каждый рабочий компьютер |
+            | **Diallog-Admin-Setup.exe** | Администратор — панель управления |
+            | **Diallog-Backend-Installer.exe** | Локальный сервер — один на офис (требует Docker Desktop) |
 
             ### Порядок установки
             1. Установите **Docker Desktop** (если ещё не установлен)
-            2. Запустите **SalesBackend-Installer.exe** — он настроит и запустит сервер
+            2. Запустите **Diallog-Backend-Installer.exe** — он настроит и запустит сервер
             3. Запишите IP-адрес сервера, который покажет инсталлятор
-            4. Установите **SalesAdmin-Setup.exe** и **SalesAnalyzer-Setup.exe**, указав этот IP при установке
+            4. Установите **Diallog-Admin-Setup.exe** и **Diallog-Setup.exe**, указав этот IP при установке
             5. Войдите в Admin App с email/паролем от сайта
           files: |
-            SalesAnalyzer-Setup.exe
-            SalesAdmin-Setup.exe
-            SalesBackend-Installer.exe
+            Diallog-Setup.exe
+            Diallog-Admin-Setup.exe
+            Diallog-Backend-Installer.exe
           draft: false
           prerelease: false
         env:
