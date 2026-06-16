@@ -1,0 +1,101 @@
+name: Build & Release Installers
+
+on:
+  push:
+    tags:
+      - "v*"          # trigger on v1.0.0, v1.2.3, etc.
+
+permissions:
+  contents: write     # needed to create releases and upload assets
+
+jobs:
+  build:
+    runs-on: windows-latest   # NSIS requires Windows
+
+    steps:
+      # ── Checkout ────────────────────────────────────────────────────────────
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # ── Node.js ─────────────────────────────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # ── Build Desktop App ───────────────────────────────────────────────────
+      - name: Install & build Desktop App
+        working-directory: desktop
+        run: |
+          npm install
+          npm run build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Build Admin App ─────────────────────────────────────────────────────
+      - name: Install & build Admin App
+        working-directory: admin
+        run: |
+          npm install
+          npm run build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Build Backend Installer ─────────────────────────────────────────────
+      - name: Install & build Backend Installer
+        working-directory: installer
+        run: |
+          npm install
+          npm run build
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # ── Rename artifacts to stable names ────────────────────────────────────
+      - name: Rename artifacts
+        shell: pwsh
+        run: |
+          # Desktop
+          $desktop = Get-ChildItem "desktop/dist" -Filter "*.exe" | Where-Object { $_.Name -notlike "*Uninstall*" } | Select-Object -First 1
+          if ($desktop) { Copy-Item $desktop.FullName "SalesAnalyzer-Setup.exe" }
+
+          # Admin
+          $admin = Get-ChildItem "admin/dist" -Filter "*.exe" | Where-Object { $_.Name -notlike "*Uninstall*" } | Select-Object -First 1
+          if ($admin) { Copy-Item $admin.FullName "SalesAdmin-Setup.exe" }
+
+          # Backend installer
+          $backend = Get-ChildItem "installer/dist" -Filter "*.exe" | Where-Object { $_.Name -notlike "*Uninstall*" } | Select-Object -First 1
+          if ($backend) { Copy-Item $backend.FullName "SalesBackend-Installer.exe" }
+
+          # List what we have
+          Get-ChildItem "*.exe"
+
+      # ── Create GitHub Release ────────────────────────────────────────────────
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "Sales Analyzer ${{ github.ref_name }}"
+          body: |
+            ## Sales Analyzer ${{ github.ref_name }}
+
+            ### Что скачать
+
+            | Файл | Для кого |
+            |------|---------|
+            | **SalesAnalyzer-Setup.exe** | Менеджер — устанавливается на каждый рабочий компьютер |
+            | **SalesAdmin-Setup.exe** | Администратор — панель управления |
+            | **SalesBackend-Installer.exe** | Локальный сервер — один на офис (требует Docker Desktop) |
+
+            ### Порядок установки
+            1. Установите **Docker Desktop** (если ещё не установлен)
+            2. Запустите **SalesBackend-Installer.exe** — он настроит и запустит сервер
+            3. Запишите IP-адрес сервера, который покажет инсталлятор
+            4. Установите **SalesAdmin-Setup.exe** и **SalesAnalyzer-Setup.exe**, указав этот IP при установке
+            5. Войдите в Admin App с email/паролем от сайта
+          files: |
+            SalesAnalyzer-Setup.exe
+            SalesAdmin-Setup.exe
+            SalesBackend-Installer.exe
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

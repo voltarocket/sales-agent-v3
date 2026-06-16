@@ -21,8 +21,9 @@
       { "from": "../backend/.env.example",     "to": "backend.env.example" }
     ],
     "win": {
-      "target":           "nsis",
-      "requestedExecutionLevel": "requireAdministrator"
+      "target":                  "nsis",
+      "requestedExecutionLevel": "requireAdministrator",
+      "signAndEditExecutable":   false
     },
     "nsis": {
       "oneClick":            false,

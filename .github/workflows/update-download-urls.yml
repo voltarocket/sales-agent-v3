@@ -1,0 +1,27 @@
+name: Update Download URLs after Release
+
+on:
+  release:
+    types: [published]   # fires after the release workflow creates the release
+
+jobs:
+  print-urls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Print download URLs
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          REPO="${{ github.repository }}"
+          BASE="https://github.com/${REPO}/releases/download/${TAG}"
+
+          echo "======================================"
+          echo "  Download URLs for website .env"
+          echo "======================================"
+          echo ""
+          echo "DOWNLOAD_DESKTOP=${BASE}/SalesAnalyzer-Setup.exe"
+          echo "DOWNLOAD_ADMIN=${BASE}/SalesAdmin-Setup.exe"
+          echo "DOWNLOAD_BACKEND=${BASE}/SalesBackend-Installer.exe"
+          echo ""
+          echo "Add these to website/backend/.env on your VPS,"
+          echo "then restart the website container:"
+          echo "  docker compose -f docker-compose.vps.yml restart website"
