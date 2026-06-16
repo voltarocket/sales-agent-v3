@@ -12,11 +12,20 @@ import { createServer } from "http";
 import { WebSocketServer } from "ws";
 import crypto from "crypto";
 
+import PQueue from "p-queue";
+
 import { pool, query, waitForDb } from "./db.js";
 import { redis, setJob, getJob } from "./redis.js";
 import { licenseState, initLicense, activateLicense, checkRateLimit, trackUsage } from "./license.js";
 
 dotenv.config();
+
+// ── AI processing queue ────────────────────────────────────────────────────────
+// Limits concurrent Groq API calls + ffmpeg processes.
+// Default 3 — safe for Groq free tier (~10 req/min). Raise to 5-8 on paid plan.
+const AI_CONCURRENCY = parseInt(process.env.AI_CONCURRENCY || "3");
+const aiQueue = new PQueue({ concurrency: AI_CONCURRENCY });
+console.log(`[Queue] AI concurrency: ${AI_CONCURRENCY}  (env AI_CONCURRENCY to change)`);
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const app    = express();
@@ -126,25 +135,39 @@ wss.on("connection", ws => {
 
     if (msg.type === "call_end" && sessionId && sessions.has(sessionId)) {
       console.log(`[WS] call_end → ${sessionId}`);
-      const session = sessions.get(sessionId);
+      const session  = sessions.get(sessionId);
       sessions.delete(sessionId);
 
-      ws.send(JSON.stringify({ type: "processing" }));
+      const jobId   = sessionId;
+      const duration = Math.round((Date.now() - session.startTime) / 1000);
 
-      const jobId = sessionId;
-      await setJob(jobId, "processing");
+      const queuePos = aiQueue.size; // jobs waiting (not counting running)
+      await setJob(jobId, "queued", { position: queuePos });
 
-      try {
-        const duration = Math.round((Date.now() - session.startTime) / 1000);
-        const result   = await processSession(session, duration);
-        await setJob(jobId, "done", { callId: result.callId });
-        ws.send(JSON.stringify({ type: "call_analyzed", ...result }));
-        console.log(`[WS] done → callId=${result.callId} score=${result.analysis?.score}`);
-      } catch (e) {
-        console.error("[WS] processing error:", e.message);
-        await setJob(jobId, "error", { error: e.message });
-        ws.send(JSON.stringify({ type: "error", error: e.message }));
+      // Tell the client: queued or processing immediately
+      if (queuePos > 0) {
+        ws.send(JSON.stringify({ type: "queued", position: queuePos, jobId }));
+        console.log(`[Queue] ${jobId} queued (position ${queuePos}, running ${aiQueue.pending})`);
+      } else {
+        ws.send(JSON.stringify({ type: "processing", jobId }));
       }
+
+      // Add to queue — does not block the WS message handler
+      aiQueue.add(async () => {
+        await setJob(jobId, "processing");
+        ws.send(JSON.stringify({ type: "processing", jobId }));
+        console.log(`[Queue] ${jobId} started  (queue size now: ${aiQueue.size})`);
+        try {
+          const result = await processSession(session, duration);
+          await setJob(jobId, "done", { callId: result.callId });
+          ws.send(JSON.stringify({ type: "call_analyzed", ...result }));
+          console.log(`[Queue] ${jobId} done → callId=${result.callId} score=${result.analysis?.score}`);
+        } catch (e) {
+          console.error(`[Queue] ${jobId} error:`, e.message);
+          await setJob(jobId, "error", { error: e.message });
+          ws.send(JSON.stringify({ type: "error", error: e.message, jobId }));
+        }
+      });
 
       sessionId = null;
     }
@@ -297,6 +320,20 @@ app.get("/api/health", async (_, res) => {
       wsPort:    process.env.FREEPBX_WS_PORT || "8088",
       extension: process.env.FREEPBX_EXTENSION || "not set",
     },
+    queue: {
+      waiting:     aiQueue.size,
+      running:     aiQueue.pending,
+      concurrency: AI_CONCURRENCY,
+    },
+  });
+});
+
+app.get("/api/queue/status", (_, res) => {
+  res.json({
+    waiting:     aiQueue.size,
+    running:     aiQueue.pending,
+    concurrency: AI_CONCURRENCY,
+    idle:        aiQueue.size === 0 && aiQueue.pending === 0,
   });
 });
 
