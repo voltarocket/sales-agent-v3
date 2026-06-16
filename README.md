@@ -9,12 +9,14 @@
 
 - [Архитектура](#архитектура)
 - [Структура проекта](#структура-проекта)
+- [Быстрый старт для конечного пользователя](#быстрый-старт-для-конечного-пользователя)
 - [Варианты развёртывания](#варианты-развёртывания)
   - [Вариант A — всё на одном сервере (разработка / тест)](#вариант-a--всё-на-одном-сервере-разработка--тест)
   - [Вариант B — распределённый продакшен](#вариант-b--распределённый-продакшен)
     - [Шаг 1 — Beget VPS: global backend + сайт](#шаг-1--beget-vps-global-backend--сайт)
     - [Шаг 2 — Локальный бэкенд в локальной сети](#шаг-2--локальный-бэкенд-в-локальной-сети)
     - [Шаг 3 — Desktop, Admin и Android приложения](#шаг-3--desktop-admin-и-android-приложения)
+- [Сборка и выпуск релиза](#сборка-и-выпуск-релиза)
 - [Разработка без Docker](#разработка-без-docker)
 - [Как работает лицензия](#как-работает-лицензия)
 - [Сайт и панель администратора](#сайт-и-панель-администратора)
@@ -52,8 +54,8 @@
 │                                                                  │
 │  ┌─────────────────────────────────────┐                        │
 │  │  LOCAL BACKEND  :3001               │  ← один на офис        │
-│  │  FastAPI + PostgreSQL               │                        │
-│  │  Менеджеры, звонки, контакты        │                        │
+│  │  Node.js/Express + PostgreSQL       │                        │
+│  │  Менеджеры, звонки, контакты, Auth  │                        │
 │  └───────┬──────────────────┬──────────┘                        │
 │          │ WebSocket        │ HTTP                               │
 │  ┌───────▼──────┐  ┌────────▼───────┐  ┌──────────────────┐   │
@@ -68,9 +70,9 @@
 | Откуда | Куда | Протокол | Что передаётся |
 |--------|------|----------|----------------|
 | Desktop / Android | Local Backend | WebSocket | Аудио-поток, статус звонка |
-| Admin App | Local Backend | HTTP | CRUD: менеджеры, звонки, настройки |
+| Admin App | Local Backend | HTTP + `x-auth-token` | CRUD: менеджеры, звонки, настройки |
 | Local Backend | Global Backend | HTTP | Аудио-файл или текст для анализа |
-| Local Backend | Global Backend | HTTP | Валидация лицензионного ключа |
+| Local Backend | Website Backend | HTTP | Проверка credentials при входе в Admin App |
 | Website Backend | Global Backend | HTTP | Выдача лицензий при регистрации |
 
 ---
@@ -80,54 +82,97 @@
 ```
 sales-agent-v3/
 │
-├── backend/                    ← Локальный бэкенд (Python / FastAPI :3001)
-│   ├── main.py                 ← Весь API: звонки, контакты, менеджеры, WebSocket
+├── backend/                    ← Локальный бэкенд (Node.js/Express :3001)
+│   ├── server.js               ← Весь API: Auth, звонки, контакты, менеджеры, WebSocket
+│   ├── db.js                   ← PostgreSQL pool
+│   ├── redis.js                ← In-memory кэш
+│   ├── license.js              ← Лицензионная логика
 │   ├── init.sql                ← Схема БД (применяется при первом запуске Docker)
-│   ├── requirements.txt
+│   ├── requirements.txt        ← Python зависимости (main.py — опциональный)
 │   ├── Dockerfile
 │   └── .env.example
 │
-├── global-backend/             ← Глобальный бэкенд (Python / FastAPI :3002)
-│   ├── main.py                 ← /process, /analyze, /licenses
-│   ├── requirements.txt
+├── global-backend/             ← Глобальный бэкенд (Node.js + Python :3002)
+│   ├── server.js               ← /process, /analyze, /licenses, license guard
+│   ├── main.py                 ← AI логика: Groq Whisper, LLM анализ
 │   ├── Dockerfile
 │   └── .env.example
 │
 ├── website/
 │   ├── backend/                ← Website FastAPI :3003
 │   │   ├── main.py             ← Регистрация, авторизация, выдача лицензий, /admin API
-│   │   ├── static/             ← Собранный React (git-ignored, см. Шаг 2)
-│   │   ├── requirements.txt
 │   │   ├── Dockerfile
 │   │   └── .env.example
 │   └── frontend/               ← React + Vite
-│       ├── src/
-│       │   ├── pages/Home.jsx          ← Лендинг + регистрация
-│       │   ├── pages/Login.jsx         ← Вход
-│       │   ├── pages/Dashboard.jsx     ← Ключ + кнопки скачать
-│       │   └── pages/Admin.jsx         ← Управление пользователями
-│       └── vite.config.js      ← Proxy /api → :3003, build → ../backend/static
+│       └── src/
+│           ├── pages/Home.jsx          ← Лендинг + регистрация
+│           ├── pages/Login.jsx         ← Вход
+│           ├── pages/Dashboard.jsx     ← Ключ + кнопки скачать
+│           └── pages/Admin.jsx         ← Управление пользователями
 │
 ├── desktop/                    ← Electron (дашборд менеджера)
-│   └── src/
-│       ├── main.js             ← BACKEND_WS + BACKEND_URL из env
-│       ├── renderer.js         ← UI: звонки, менеджеры, аналитика
-│       └── preload.js
+│   ├── src/main.js             ← Читает BACKEND_URL из installer или env
+│   ├── installer.nsh           ← NSIS: доп. страница с вводом BACKEND_URL
+│   └── package.json
 │
 ├── admin/                      ← Electron (панель администратора)
+│   ├── src/main.js             ← Вход через email/пароль сайта
+│   ├── installer.nsh           ← NSIS: доп. страница с вводом BACKEND_URL
+│   └── package.json
+│
+├── installer/                  ← Electron-визард установки бэкенда
 │   └── src/
-│       ├── main.js             ← BACKEND_URL из env, auth через website /api/auth/verify
-│       ├── renderer.js         ← UI: менеджеры, лицензии, настройки
-│       └── preload.js
+│       ├── main.js             ← Проверка Docker, запись .env, docker compose up
+│       └── index.html          ← 4-шаговый UI мастера установки
 │
 ├── android/                    ← Kotlin (запись звонков с телефона)
 │
+├── .github/workflows/
+│   ├── release.yml             ← Сборка всех инсталляторов и создание GitHub Release
+│   └── update-download-urls.yml← Вывод ссылок для website .env после релиза
+│
 ├── docker-compose.yml          ← Всё на одном хосте (разработка / тест)
-├── docker-compose.vps.yml      ← Только global-backend + postgres (для VPS)
-├── docker-compose.beget.yml    ← Только website + postgres (для Beget VPS)
-├── docker-compose.local.yml    ← Только local-backend + postgres (для LAN-машины)
-└── package.json                ← npm-скрипты для разработки и деплоя
+├── docker-compose.vps.yml      ← Global backend + website + postgres (VPS)
+├── docker-compose.local.yml    ← Local backend + postgres (офисная машина)
+└── package.json                ← npm-скрипты для разработки
 ```
+
+---
+
+## Быстрый старт для конечного пользователя
+
+> Это раздел для клиентов, которые уже зарегистрировались на сайте.
+
+**1. Скачайте и установите приложения** со страницы [Releases](https://github.com/voltarocket/sales-agent-v3/releases/latest) или из личного кабинета на сайте:
+
+| Файл | Назначение |
+|------|-----------|
+| `SalesBackend-Installer.exe` | Локальный сервер — **один раз на офис** |
+| `SalesAdmin-Setup.exe` | Панель администратора |
+| `SalesAnalyzer-Setup.exe` | Приложение менеджера (на каждый ПК) |
+
+**2. Установите бэкенд первым**
+
+Запустите `SalesBackend-Installer.exe` от имени администратора. Визард:
+- Проверит наличие Docker Desktop (предложит скачать если нет)
+- Попросит ввести адрес сайта и Groq API ключ
+- Автоматически скачает образы и запустит сервисы
+- Покажет IP-адрес этого компьютера (нужен для шага 3)
+
+**3. Установите Admin App и Desktop App**
+
+При установке каждого из них введите IP из предыдущего шага:
+```
+http://192.168.1.X:3001
+```
+
+**4. Войдите в Admin App**
+
+Используйте email и пароль от аккаунта на сайте. Лицензия активируется автоматически.
+
+**5. Создайте менеджеров в Admin App**
+
+Менеджеры входят в Desktop App через свой логин и пароль.
 
 ---
 
@@ -158,11 +203,12 @@ ADMIN_SECRET=my-secret-123    # произвольная строка, запо�
 `backend/.env`:
 ```env
 GLOBAL_ADMIN_SECRET=my-secret-123   # та же строка, что ADMIN_SECRET выше
+WEBSITE_URL=http://localhost:3003    # для входа в Admin App через аккаунт сайта
 ```
 
 `website/backend/.env`:
 ```env
-GLOBAL_ADMIN_SECRET=my-secret-123   # та же строка
+GLOBAL_ADMIN_SECRET=my-secret-123
 SITE_ADMIN_USER=admin
 SITE_ADMIN_PASS=сильный-пароль
 ```
@@ -179,8 +225,7 @@ cd ../..
 **4. Запустить**
 
 ```bash
-npm run docker:up
-# или: docker compose up --build
+docker compose up --build
 ```
 
 Сервисы:
@@ -201,32 +246,25 @@ npm run dev:admin      # панель администратора
 ### Вариант B — распределённый продакшен
 
 ```
-Beget VPS   →  global backend + website (один сервер, docker-compose.vps.yml)
+Beget VPS   →  global backend + website (docker-compose.vps.yml)
 Каждый офис →  local backend + desktop/admin на ПК (docker-compose.local.yml)
 ```
 
-> **Важно:** Beget **shared hosting** не подходит — FastAPI требует постоянный процесс (uvicorn), а PostgreSQL на базовом shared не предоставляется. Нужен **Beget VPS** (Linux, от ~300 руб/мес). Global backend и сайт живут на одном VPS.
+> **Важно:** Beget **shared hosting** не подходит — нужен **Beget VPS** (Linux, от ~300 руб/мес).
 
 ---
 
 #### Шаг 1 — Beget VPS: global backend + сайт
 
-Один сервер держит и AI-шлюз, и публичный сайт. Внутри Docker-сети они общаются напрямую, наружу торчат порты 3002 (API) и 3003 (сайт).
-
-**Требования:** Docker, Docker Compose, Node.js (для сборки фронтенда), открытые порты `3002` и `3003`
+**Требования:** Docker, Docker Compose, открытые порты `3002` и `3003`
 
 **1.1. Загрузить проект на VPS**
 
 ```bash
-git clone <repo> ~/sales && cd ~/sales
+git clone https://github.com/voltarocket/sales-agent-v3.git ~/sales && cd ~/sales
 ```
 
-Или через scp:
-```bash
-scp -r . user@BEGET-IP:~/sales/
-```
-
-**1.2. Собрать фронтенд сайта** (один раз перед запуском)
+**1.2. Собрать фронтенд сайта**
 
 ```bash
 cd website/frontend && npm install && npm run build && cd ../..
@@ -240,10 +278,9 @@ nano global-backend/.env
 ```
 
 ```env
-PORT=3002
-GROQ_API_KEY=gsk_...                  # https://console.groq.com → API Keys
-ADMIN_SECRET=придумай-сложный-пароль  # запомни — нужен во всех остальных .env
-REQUIRE_LICENSE=true                  # включить проверку лицензий в продакшене
+GROQ_API_KEY=gsk_...
+ADMIN_SECRET=придумай-сложный-пароль
+REQUIRE_LICENSE=true
 ```
 
 **1.4. Создать .env для сайта**
@@ -254,22 +291,16 @@ nano website/backend/.env
 ```
 
 ```env
-PORT=3003
-# Внутри Docker-сети — не меняй эту строку
 GLOBAL_BACKEND_URL=http://global-backend:3002
-
-# Тот же пароль, что ADMIN_SECRET выше
 GLOBAL_ADMIN_SECRET=придумай-сложный-пароль
-
-# Логин/пароль для страницы /admin на сайте
 SITE_ADMIN_USER=admin
 SITE_ADMIN_PASS=сильный-пароль-для-владельца
 
-# Ссылки на файлы для скачивания (после того как выложишь сборки)
-DOWNLOAD_DESKTOP=https://files.yourdomain.com/desktop-setup.exe
-DOWNLOAD_ADMIN=https://files.yourdomain.com/admin-setup.exe
-DOWNLOAD_BACKEND=https://files.yourdomain.com/docker-compose.local.yml
-DOWNLOAD_ANDROID=https://files.yourdomain.com/sales-analyzer.apk
+# Ссылки из GitHub Releases (заполнить после первого релиза)
+DOWNLOAD_DESKTOP=https://github.com/voltarocket/sales-agent-v3/releases/download/v1.0.0/SalesAnalyzer-Setup.exe
+DOWNLOAD_ADMIN=https://github.com/voltarocket/sales-agent-v3/releases/download/v1.0.0/SalesAdmin-Setup.exe
+DOWNLOAD_BACKEND=https://github.com/voltarocket/sales-agent-v3/releases/download/v1.0.0/SalesBackend-Installer.exe
+DOWNLOAD_ANDROID=https://github.com/voltarocket/sales-agent-v3/releases/download/v1.0.0/sales-analyzer.apk
 ```
 
 **1.5. Запустить**
@@ -281,24 +312,18 @@ docker compose -f docker-compose.vps.yml up -d --build
 **1.6. Открыть порты в файрволе**
 
 ```bash
-# UFW (Ubuntu — стандарт на Beget VPS)
-ufw allow 3002/tcp   # global backend API (нужен local-backend в офисах)
-ufw allow 3003/tcp   # сайт
-
-# firewalld (CentOS/RHEL)
-firewall-cmd --permanent --add-port=3002/tcp --add-port=3003/tcp && firewall-cmd --reload
+ufw allow 3002/tcp
+ufw allow 3003/tcp
 ```
 
 **1.7. Проверить**
 
 ```bash
-curl http://BEGET-IP:3002/health
-# → {"status":"ok","groq":true}
+curl http://BEGET-IP:3002/health   # → {"status":"ok"}
+# Открой в браузере: http://BEGET-IP:3003
 ```
 
-Открой в браузере `http://BEGET-IP:3003` — должна появиться страница регистрации.
-
-**1.8. (Рекомендуется) Nginx + SSL для сайта**
+**1.8. (Рекомендуется) Nginx + SSL**
 
 ```bash
 apt install nginx certbot python3-certbot-nginx
@@ -311,14 +336,11 @@ server {
     server_name yourdomain.com;
     return 301 https://$host$request_uri;
 }
-
 server {
     listen 443 ssl;
     server_name yourdomain.com;
-
     ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-
     location / {
         proxy_pass http://localhost:3003;
         proxy_set_header Host $host;
@@ -337,48 +359,26 @@ nginx -s reload
 
 #### Шаг 2 — Локальный бэкенд в локальной сети
 
-Один экземпляр на офис (или на каждый изолированный сегмент сети). Хранит звонки, контакты, менеджеров. Получает AI-анализ от глобального бэкенда на Beget VPS.
+Один экземпляр на офис. Хранит звонки, контакты, менеджеров. AI-анализ получает от Global Backend на VPS.
 
-**Требования на LAN-машине:** Docker, Docker Compose, открытый порт `3001` в локальной сети (не в интернете)
+**Требования:** Docker Desktop, открытый порт `3001` в локальной сети
 
-**2.1. Скопировать файлы**
+> Проще всего использовать `SalesBackend-Installer.exe` из [Releases](https://github.com/voltarocket/sales-agent-v3/releases/latest) — он сделает всё автоматически.
 
-```powershell
-# Windows — PowerShell или Git Bash
-git clone <repo> C:\sales-agent
-# или скопировать папки backend/ и docker-compose.local.yml вручную
-```
-
-```bash
-# Linux
-git clone <repo> ~/sales-agent
-```
-
-**2.2. Создать .env**
+**Ручная установка:**
 
 ```bash
 cp backend/.env.example backend/.env
 ```
 
-Открыть `backend/.env` и заполнить:
-
+`backend/.env`:
 ```env
-PORT=3001
-DATABASE_URL=postgresql://sales:sales_pass@postgres:5432/sales_agent
-
-# Адрес глобального бэкенда на Beget VPS (из Шага 1)
 GLOBAL_BACKEND_URL=http://BEGET-IP:3002
-
-# Тот же пароль, что ADMIN_SECRET в global-backend/.env
 GLOBAL_ADMIN_SECRET=придумай-сложный-пароль
-
-# Лицензионный ключ — получить на сайте после регистрации (Шаг 1)
-# Оставь пустым для dev-режима без лицензии
-LICENSE_KEY=SALES-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+WEBSITE_URL=https://yourdomain.com    # для входа в Admin App через аккаунт сайта
 
 # FreePBX / SIP (если используется IP-телефония)
-FREEPBX_HOST=192.168.1.100    # IP АТС в локальной сети
-FREEPBX_DOMAIN=office.local
+FREEPBX_HOST=192.168.1.100
 FREEPBX_EXTENSION=1000
 FREEPBX_PASSWORD=sip-password
 
@@ -387,95 +387,68 @@ TELEGRAM_BOT_TOKEN=
 TELEGRAM_CHAT_ID=
 ```
 
-**2.3. Запустить**
-
 ```bash
 docker compose -f docker-compose.local.yml up -d --build
-```
-
-**2.4. Проверить**
-
-```bash
 curl http://localhost:3001/api/health
-# → {"status":"ok","database":"connected","license":"..."}
 ```
 
-**2.5. Узнать LAN IP этой машины**
-
+Узнать LAN IP этой машины:
 ```powershell
-# Windows
-ipconfig | findstr "IPv4"
-# например: 192.168.1.50
+ipconfig | findstr "IPv4"   # Windows
 ```
-
-```bash
-# Linux
-ip addr show | grep "inet "
-```
-
-Запомни этот IP — он понадобится в Шаге 3 для Desktop/Admin приложений и Android.
 
 ---
 
 #### Шаг 3 — Desktop, Admin и Android приложения
 
-Electron-приложения работают на каждом компьютере менеджера / администратора. Им нужно знать адрес локального бэкенда из Шага 2.
+> Проще всего использовать готовые инсталляторы из [Releases](https://github.com/voltarocket/sales-agent-v3/releases/latest) — при установке они попросят ввести IP бэкенда.
 
-##### Запуск в режиме разработки (с нужным бэкендом)
+**Запуск в режиме разработки:**
 
-**Windows — PowerShell:**
 ```powershell
-# Desktop (дашборд менеджера)
+# Windows PowerShell
 $env:BACKEND_URL = "http://192.168.1.50:3001"
 $env:BACKEND_WS  = "ws://192.168.1.50:3001"
-cd desktop
-npm install
-npm start
-
-# Admin (панель администратора) — в другом терминале
-$env:BACKEND_URL = "http://192.168.1.50:3001"
-cd admin
-npm install
-npm start
+cd desktop && npm install && npm start
 ```
 
-**Linux / macOS:**
-```bash
-BACKEND_URL=http://192.168.1.50:3001 BACKEND_WS=ws://192.168.1.50:3001 npm start
-```
+**Вход в Admin App:**  
+Email и пароль от аккаунта на сайте. Лицензия активируется автоматически.
 
-##### Сборка установщика (.exe / .dmg / .AppImage)
+**Android:**  
+Укажи `ws://192.168.1.50:3001` при первом запуске. Телефон должен быть в той же Wi-Fi сети.
+
+---
+
+## Сборка и выпуск релиза
+
+Инсталляторы собираются автоматически через **GitHub Actions** при создании тега.
 
 ```bash
-# Desktop
-cd desktop
-npm install
-BACKEND_URL=http://192.168.1.50:3001 BACKEND_WS=ws://192.168.1.50:3001 npm run build
-# → dist/desktop-setup.exe (Windows)
-
-# Admin
-cd admin
-npm install
-BACKEND_URL=http://192.168.1.50:3001 npm run build
-# → dist/admin-setup.exe
+git tag v1.0.0
+git push origin v1.0.0
 ```
 
-> Если local-backend крутится на том же компьютере, где запускается Desktop/Admin — оставь `localhost` (значение по умолчанию). Меняй только когда бэкенд на другой машине в сети.
+Workflow `.github/workflows/release.yml`:
+1. Запускает сборку на `windows-latest`
+2. Собирает `desktop`, `admin` и `installer` через `electron-builder`
+3. Создаёт GitHub Release с прикреплёнными `.exe` файлами
+4. Второй workflow выводит готовые `DOWNLOAD_*` строки для `website/backend/.env`
 
-##### Вход в Admin App
+После релиза обнови ссылки на VPS:
 
-При первом запуске Admin App потребует авторизацию — используй email и пароль с сайта (Шаг 1). Admin App вызывает `POST /api/auth/verify` на website backend для проверки credentials.
+```bash
+nano website/backend/.env   # обновить DOWNLOAD_* на новые URL из релиза
+docker compose -f docker-compose.vps.yml restart website
+```
 
-##### Android в локальной сети
+**Ручная сборка:**
 
-Android-приложение подключается к local-backend по WebSocket точно так же, как Desktop App. При первом запуске приложение показывает экран логина с полем адреса бэкенда:
-
-1. Введи адрес local-backend: `ws://192.168.1.50:3001` (LAN IP из Шага 2)
-2. Введи логин и пароль менеджера (создаются в Admin App)
-3. Адрес сохраняется — при следующих запусках восстанавливается автоматически
-4. Изменить адрес потом можно в вкладке **Настройки** → поле URL → кнопка **Сохранить**
-
-**Условие:** телефон должен быть в той же Wi-Fi сети, что и машина с local-backend.
+```bash
+cd desktop   && npm install && npm run build   # → desktop/dist/
+cd admin     && npm install && npm run build   # → admin/dist/
+cd installer && npm install && npm run build   # → installer/dist/
+```
 
 ---
 
@@ -483,61 +456,46 @@ Android-приложение подключается к local-backend по WebS
 
 ```bash
 # PostgreSQL должен быть запущен локально
-# Применить схему БД:
 psql -U sales -d sales_agent -f backend/init.sql
 
-# Установить зависимости Python
-pip install -r backend/requirements.txt
-pip install -r global-backend/requirements.txt
-pip install -r website/backend/requirements.txt
+# Node.js бэкенды:
+cd backend        && node server.js   # :3001
+cd global-backend && node server.js   # :3002
 
-# Запустить сервисы по отдельности (в трёх терминалах):
-python global-backend/main.py    # :3002
-python backend/main.py           # :3001
-python website/backend/main.py   # :3003
-
-# Фронтенд сайта в режиме watch:
-cd website/frontend && npm run dev    # http://localhost:5173 (proxy → :3003)
+# Website:
+cd website/backend  && python main.py   # :3003
+cd website/frontend && npm run dev      # :5173 (proxy → :3003)
 
 # Electron:
-npm run dev:desktop
-npm run dev:admin
-```
-
-Или сразу всё через concurrently:
-```bash
-npm run dev         # global + local + desktop
-npm run dev:all     # + admin panel
+cd desktop && npm start
+cd admin   && npm start
 ```
 
 ---
 
 ## Как работает лицензия
 
-1. Пользователь регистрируется на сайте → Website Backend автоматически вызывает `POST /licenses/issue` на Global Backend → создаётся лицензионный ключ вида `SALES-XXXXXXXX...`
-2. Пользователь видит ключ на странице Dashboard и копирует его
-3. Ключ прописывается в `backend/.env` → `LICENSE_KEY=SALES-...`
-4. При старте Local Backend валидирует ключ через Global Backend (кэш 1 час)
-5. Каждый AI-вызов (транскрипция + анализ) проверяет лицензию и записывает usage
-6. Если `LICENSE_KEY` не задан — работает в dev-режиме без ограничений (все AI-запросы проходят)
-7. Если `REQUIRE_LICENSE=true` на Global Backend — запросы без валидного ключа отклоняются с `403`
+1. Пользователь регистрируется на сайте → Website Backend выдаёт лицензионный ключ автоматически
+2. Ключ отображается в личном кабинете (`/dashboard`)
+3. При входе в Admin App (email + пароль сайта) → Local Backend получает ключ и активирует лицензию автоматически
+4. При каждом AI-запросе Local Backend проверяет лицензию через Global Backend (кэш 1 час)
+5. Если `LICENSE_KEY` не задан — dev-режим без ограничений
+6. Если `REQUIRE_LICENSE=true` на Global Backend — запросы без валидного ключа возвращают `403`
 
 ---
 
 ## Сайт и панель администратора
 
-Сайт доступен по адресу Beget VPS (или `http://localhost:3003` в dev-режиме).
-
 | Страница | URL | Описание |
 |----------|-----|----------|
-| Лендинг | `/` | Регистрация / вход |
+| Лендинг | `/` | Регистрация |
+| Вход | `/login` | Вход в аккаунт |
 | Личный кабинет | `/dashboard` | Лицензионный ключ, ссылки на скачивание |
 | Панель владельца | `/admin` | Управление пользователями |
 
-**Вход в панель владельца** (`/admin`):
-- Логин: значение `SITE_ADMIN_USER` (по умолчанию `admin`)
-- Пароль: значение `SITE_ADMIN_PASS` (по умолчанию `admin`, **обязательно сменить**)
-- Доступно: список всех пользователей, статистика, блокировка/разблокировка
+**Вход в `/admin`:**
+- Логин: `SITE_ADMIN_USER` (по умолчанию `admin`)
+- Пароль: `SITE_ADMIN_PASS` (**обязательно сменить в продакшене**)
 
 ---
 
@@ -546,19 +504,16 @@ npm run dev:all     # + admin panel
 ### Сборка в Android Studio
 
 1. `File → Open → sales-agent-v3/android`
-2. Дождись Gradle sync (5–10 мин при первом запуске)
-3. `Tools → Device Manager → Create Device → Pixel 7 → Android 14` (для эмулятора)
-4. Нажми ▶ Run
+2. Дождись Gradle sync (~5 мин)
+3. Нажми ▶ Run
 
 ### Подключение к бэкенду
 
-В приложении открой вкладку **Настройки** и укажи адрес локального бэкенда:
-
+При первом запуске введи адрес локального бэкенда:
 ```
 ws://192.168.1.50:3001
 ```
-
-Телефон и компьютер с local-backend должны быть в одной Wi-Fi сети.
+Телефон и компьютер с бэкендом должны быть в одной Wi-Fi сети.
 
 ---
 
@@ -566,61 +521,71 @@ ws://192.168.1.50:3001
 
 ### Local Backend (:3001)
 
+#### Auth
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/api/auth/login` | Вход менеджера (username + password) |
+| GET | `/api/auth/me` | Текущий менеджер (заголовок `x-auth-token`) |
+| POST | `/api/auth/admin` | Вход администратора (email + password от сайта) |
+| POST | `/api/auth/logout` | Выход |
+
+#### Данные
+
 | Метод | Путь | Описание |
 |-------|------|----------|
 | GET | `/api/health` | Статус всех компонентов |
 | GET | `/api/license/status` | Текущий статус лицензии |
-| POST | `/api/license/activate` | Активировать лицензионный ключ |
-| GET / POST | `/api/calls` | Список звонков / создать звонок |
-| PUT / DELETE | `/api/calls/{id}` | Изменить / удалить звонок |
+| GET / POST | `/api/calls` | Список звонков / создать |
+| PUT / DELETE | `/api/calls/:id` | Изменить / удалить |
 | GET / POST | `/api/contacts` | Контакты |
-| GET / PUT / DELETE | `/api/contacts/{id}` | Контакт по ID |
+| GET / PUT / DELETE | `/api/contacts/:id` | Контакт по ID |
 | GET / POST | `/api/managers` | Менеджеры |
-| PUT / DELETE | `/api/managers/{id}` | Изменить / удалить менеджера |
-| POST | `/api/managers/{id}/stats` | Обновить статистику менеджера |
-| DELETE | `/api/managers/{id}/reset` | Сбросить статистику |
-| GET / PUT | `/api/settings/{key}` | Настройки |
+| GET | `/api/managers/:id/calls` | Звонки менеджера |
+| PUT / DELETE | `/api/managers/:id` | Изменить / удалить |
+| POST | `/api/managers/:id/stats` | Обновить статистику |
+| DELETE | `/api/managers/:id/reset` | Сбросить статистику |
+| GET | `/api/settings` | Все настройки |
+| PUT | `/api/settings` | Обновить настройки (bulk) |
+| PUT | `/api/settings/:key` | Обновить одну настройку |
 | POST | `/api/notify` | Telegram-уведомление |
 | GET | `/api/sip/config` | Конфигурация SIP/FreePBX |
-| POST | `/api/transcribe` | Аудио → транскрипт (прокси к Global Backend) |
-| POST | `/api/analyze` | Текст → анализ (прокси к Global Backend) |
-| GET | `/api/jobs/{id}` | Статус фонового задания |
-| GET | `/api/plans` | Тарифные планы |
-| GET | `/api/licenses` | Список лицензий |
-| WS | `/` | WebSocket-стрим (аудио от Desktop / Android) |
+| POST | `/api/transcribe` | Аудио → транскрипт (прокси) |
+| POST | `/api/analyze` | Текст → анализ (прокси) |
+| WS | `/` | Аудио-стрим от Desktop / Android |
 
 ### Global Backend (:3002)
 
-Запросы, требующие прав администратора, передают заголовок `X-Admin-Secret: <ADMIN_SECRET>`.
+Заголовок `X-Admin-Secret` для Admin-эндпоинтов.
 
 | Метод | Путь | Доступ | Описание |
 |-------|------|--------|----------|
-| GET | `/health` | Public | Статус сервиса |
-| POST | `/process` | License | Аудио-файл → транскрипт + анализ |
-| POST | `/analyze` | License | Текст → анализ звонка |
-| GET | `/plans` | Admin | Список тарифных планов |
-| GET | `/licenses` | Admin | Список всех лицензий |
-| POST | `/licenses/issue` | Admin | Выдать новую лицензию |
-| POST | `/licenses/validate` | Public | Проверить лицензионный ключ |
+| GET | `/health` | Public | Статус |
+| POST | `/process` | License | Аудио → транскрипт + анализ |
+| POST | `/analyze` | License | Текст → анализ |
+| GET | `/plans` | Admin | Тарифные планы |
+| GET | `/licenses` | Admin | Все лицензии |
+| POST | `/licenses/issue` | Admin | Выдать лицензию |
+| POST | `/licenses/validate` | Public | Проверить ключ |
 | POST | `/licenses/usage` | Public | Записать использование |
-| GET | `/licenses/{key}/status` | Public | Статус конкретной лицензии |
-| PATCH | `/licenses/{key}` | Admin | Изменить параметры лицензии |
-| DELETE | `/licenses/{key}` | Admin | Отозвать лицензию |
+| GET | `/licenses/:key/status` | Public | Статус лицензии |
+| PATCH | `/licenses/:key` | Admin | Изменить лицензию |
+| DELETE | `/licenses/:key` | Admin | Отозвать лицензию |
 
 ### Website Backend (:3003)
 
 | Метод | Путь | Описание |
 |-------|------|----------|
 | POST | `/api/auth/register` | Регистрация (авто-выдаёт лицензию) |
-| POST | `/api/auth/login` | Вход пользователя |
+| POST | `/api/auth/login` | Вход |
 | POST | `/api/auth/verify` | Проверка credentials (используется Admin App) |
 | POST | `/api/auth/logout` | Выход |
-| GET | `/api/user/me` | Данные пользователя + лицензионный ключ |
-| GET | `/api/user/downloads` | Ссылки на скачивание приложений |
-| POST | `/api/admin/login` | Вход владельца системы |
-| GET | `/api/admin/users` | Список зарегистрированных пользователей |
-| GET | `/api/admin/stats` | Статистика (пользователи, звонки) |
-| PATCH | `/api/admin/users/{id}/toggle` | Заблокировать / разблокировать пользователя |
+| GET | `/api/user/me` | Данные пользователя + ключ |
+| GET | `/api/user/downloads` | Ссылки на скачивание |
+| POST | `/api/admin/login` | Вход владельца |
+| GET | `/api/admin/users` | Список пользователей |
+| GET | `/api/admin/stats` | Статистика |
+| PATCH | `/api/admin/users/:id/toggle` | Блокировка пользователя |
 
 ---
 
