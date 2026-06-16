@@ -102,7 +102,7 @@ function loginPage() {
 <div class="login-shell">
   <div class="login-card">
     <div class="login-logo">
-      <div class="logo-tag">Диалог</div>
+      <div class="logo-tag">Diallog</div>
       <div class="logo-h">Администратор</div>
     </div>
     <div class="login-title">Вход администратора</div>
@@ -123,7 +123,7 @@ function sidebar() {
   return `
 <div class="sidebar">
   <div class="logo">
-    <div class="logo-tag">Диалог</div>
+    <div class="logo-tag">Diallog</div>
     <div class="logo-h">Администратор</div>
   </div>
   <div class="nav-section">

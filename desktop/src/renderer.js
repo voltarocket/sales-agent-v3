@@ -228,7 +228,7 @@ function loginPage() {
 <div class="login-shell">
   <div class="login-card">
     <div class="login-logo">
-      <div class="logo-tag">Диалог</div>
+      <div class="logo-tag">Diallog</div>
       <div class="logo-h">Анализ звонков</div>
     </div>
     <div class="login-title">Вход в систему</div>
@@ -254,7 +254,7 @@ function sidebar() {
   return `
 <div class="sidebar">
   <div class="logo">
-    <div class="logo-tag">Диалог</div>
+    <div class="logo-tag">Diallog</div>
     <div class="logo-h">Анализ звонков</div>
   </div>
   ${nav("phone","☎","Звонок")}

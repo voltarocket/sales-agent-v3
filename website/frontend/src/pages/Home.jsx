@@ -23,7 +23,7 @@ export default function Home() {
   return (
     <>
       <nav>
-        <span className="nav-logo">Диалог</span>
+        <span className="nav-logo">Diallog</span>
         <div className="nav-links">
           <Link to="/login"><button className="btn-secondary btn-sm">Войти</button></Link>
         </div>
