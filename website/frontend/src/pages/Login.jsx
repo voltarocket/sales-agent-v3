@@ -23,7 +23,7 @@ export default function Login() {
   return (
     <>
       <nav>
-        <Link to="/" className="nav-logo">📞 Sales Analyzer</Link>
+        <Link to="/" className="nav-logo">Диалог</Link>
         <div className="nav-links">
           <Link to="/"><button className="btn-secondary btn-sm">На главную</button></Link>
         </div>

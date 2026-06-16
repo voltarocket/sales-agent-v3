@@ -228,8 +228,8 @@ function loginPage() {
 <div class="login-shell">
   <div class="login-card">
     <div class="login-logo">
-      <div class="logo-tag">Sales AI</div>
-      <div class="logo-h">Call Analyzer</div>
+      <div class="logo-tag">Диалог</div>
+      <div class="logo-h">Анализ звонков</div>
     </div>
     <div class="login-title">Вход в систему</div>
     ${S.loginError ? `<div class="alert-red" style="margin-bottom:14px">${esc(S.loginError)}</div>` : ""}
@@ -254,8 +254,8 @@ function sidebar() {
   return `
 <div class="sidebar">
   <div class="logo">
-    <div class="logo-tag">Sales AI</div>
-    <div class="logo-h">Call Analyzer</div>
+    <div class="logo-tag">Диалог</div>
+    <div class="logo-h">Анализ звонков</div>
   </div>
   ${nav("phone","☎","Звонок")}
   ${nav("contacts","◈","Контакты",S.contacts.length||"")}

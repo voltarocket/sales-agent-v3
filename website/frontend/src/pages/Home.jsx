@@ -23,30 +23,16 @@ export default function Home() {
   return (
     <>
       <nav>
-        <span className="nav-logo">📞 Sales Analyzer</span>
+        <span className="nav-logo">Диалог</span>
         <div className="nav-links">
           <Link to="/login"><button className="btn-secondary btn-sm">Войти</button></Link>
         </div>
       </nav>
 
       <div className="hero">
-        <h1>Анализ звонков<br />на <span>базе ИИ</span></h1>
-        <p>Транскрипция, оценка качества и рекомендации для каждого звонка менеджера по продажам</p>
-      </div>
-
-      <div className="features page">
-        {[
-          { icon: "🎙", title: "Транскрипция", desc: "Автоматическое распознавание речи через Groq Whisper" },
-          { icon: "🤖", title: "ИИ-анализ",    desc: "LLaMA 3.3 70b анализирует разговор и выявляет ошибки" },
-          { icon: "📊", title: "Оценка",       desc: "Скоринг звонка по 100-бальной шкале" },
-          { icon: "📱", title: "Android",      desc: "Запись звонков прямо с телефона через приложение" },
-        ].map(f => (
-          <div className="feature-card" key={f.title}>
-            <div className="icon">{f.icon}</div>
-            <h3>{f.title}</h3>
-            <p>{f.desc}</p>
-          </div>
-        ))}
+        <div className="hero-badge">Анализ звонков на базе ИИ</div>
+        <h1>Контроль качества<br />каждого звонка</h1>
+        <p>Транскрипция, оценка и рекомендации автоматически — для всей команды продаж</p>
       </div>
 
       <div className="auth-wrap">
