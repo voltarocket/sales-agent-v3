@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8"/>
+  <title>Sales Analyzer — Установка</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #0a0a0f;
+      color: #e2e2f0;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+
+    /* Header */
+    .header {
+      background: #12121e;
+      border-bottom: 1px solid #1e1e3a;
+      padding: 16px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .header-icon { font-size: 24px; }
+    .header h1 { font-size: 15px; font-weight: 600; color: #fff; }
+    .header p  { font-size: 11px; color: #666; margin-top: 2px; }
+
+    /* Steps indicator */
+    .steps {
+      display: flex;
+      gap: 0;
+      background: #0f0f1a;
+      border-bottom: 1px solid #1e1e3a;
+      padding: 0 24px;
+    }
+    .step {
+      padding: 10px 16px;
+      font-size: 11px;
+      color: #444;
+      border-bottom: 2px solid transparent;
+      transition: all .2s;
+      white-space: nowrap;
+    }
+    .step.active  { color: #818cf8; border-bottom-color: #818cf8; }
+    .step.done    { color: #4ade80; }
+
+    /* Content */
+    .content {
+      flex: 1;
+      padding: 24px;
+      overflow-y: auto;
+    }
+
+    .screen { display: none; }
+    .screen.active { display: block; }
+
+    h2 { font-size: 16px; font-weight: 600; color: #fff; margin-bottom: 6px; }
+    p  { font-size: 13px; color: #888; line-height: 1.6; }
+
+    /* Status card */
+    .card {
+      background: #12121e;
+      border: 1px solid #1e1e3a;
+      border-radius: 8px;
+      padding: 16px;
+      margin-top: 16px;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 0;
+      font-size: 13px;
+    }
+    .status-row + .status-row { border-top: 1px solid #1a1a2e; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .dot.ok  { background: #4ade80; }
+    .dot.bad { background: #f87171; }
+    .dot.na  { background: #444; }
+
+    /* Form */
+    .form-group { margin-top: 14px; }
+    label { display: block; font-size: 12px; color: #aaa; margin-bottom: 5px; }
+    input {
+      width: 100%;
+      background: #12121e;
+      border: 1px solid #2a2a4a;
+      border-radius: 6px;
+      padding: 8px 12px;
+      color: #e2e2f0;
+      font-size: 13px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    input:focus { border-color: #818cf8; }
+    .hint { font-size: 11px; color: #555; margin-top: 4px; }
+
+    /* Log */
+    .log-box {
+      background: #080810;
+      border: 1px solid #1a1a30;
+      border-radius: 6px;
+      padding: 12px;
+      font-family: "Courier New", monospace;
+      font-size: 11px;
+      color: #6ee7b7;
+      height: 180px;
+      overflow-y: auto;
+      margin-top: 16px;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+
+    /* Buttons */
+    .footer {
+      padding: 16px 24px;
+      background: #0f0f1a;
+      border-top: 1px solid #1e1e3a;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+    }
+    button {
+      padding: 8px 20px;
+      border-radius: 6px;
+      border: none;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: opacity .15s;
+    }
+    button:disabled { opacity: .4; cursor: default; }
+    .btn-primary   { background: #4f46e5; color: #fff; }
+    .btn-secondary { background: #1e1e3a; color: #aaa; }
+    .btn-danger    { background: #7f1d1d; color: #fca5a5; }
+    button:not(:disabled):hover { opacity: .85; }
+
+    .link-btn {
+      background: none; border: none; color: #818cf8;
+      font-size: 12px; cursor: pointer; text-decoration: underline; padding: 0;
+    }
+
+    .success-icon { font-size: 48px; text-align: center; margin: 20px 0 8px; }
+    .ip-box {
+      background: #0f0f1a;
+      border: 1px solid #2a2a4a;
+      border-radius: 6px;
+      padding: 10px 16px;
+      font-family: monospace;
+      font-size: 14px;
+      color: #818cf8;
+      text-align: center;
+      margin-top: 12px;
+    }
+  </style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-icon">📞</div>
+  <div>
+    <h1>Sales Analyzer — Установка локального бекенда</h1>
+    <p>Мастер установки проведёт вас по всем шагам</p>
+  </div>
+</div>
+
+<div class="steps">
+  <div class="step active" id="step-tab-0">1. Проверка</div>
+  <div class="step"        id="step-tab-1">2. Настройка</div>
+  <div class="step"        id="step-tab-2">3. Установка</div>
+  <div class="step"        id="step-tab-3">4. Готово</div>
+</div>
+
+<div class="content">
+
+  <!-- STEP 0: Docker check -->
+  <div class="screen active" id="screen-0">
+    <h2>Проверка зависимостей</h2>
+    <p>Локальный бекенд работает в Docker-контейнерах.</p>
+
+    <div class="card">
+      <div class="status-row">
+        <div class="dot na" id="dot-docker"></div>
+        <span id="txt-docker">Проверяем Docker Desktop...</span>
+      </div>
+      <div class="status-row">
+        <div class="dot na" id="dot-running"></div>
+        <span id="txt-running">Проверяем статус Docker...</span>
+      </div>
+    </div>
+
+    <div id="docker-missing" style="display:none; margin-top:16px;">
+      <p>Docker Desktop не установлен. Скачайте и установите его, затем запустите и вернитесь.</p>
+      <button class="btn-primary" style="margin-top:10px;" onclick="openDockerDownload()">
+        Скачать Docker Desktop
+      </button>
+    </div>
+  </div>
+
+  <!-- STEP 1: Config -->
+  <div class="screen" id="screen-1">
+    <h2>Настройка</h2>
+    <p>Укажите параметры вашей установки.</p>
+
+    <div class="form-group">
+      <label>URL сайта (для входа через аккаунт)</label>
+      <input id="inp-website" type="url" placeholder="https://yourdomain.com" />
+      <div class="hint">Адрес вашего сайта Sales Analyzer. Используется для входа администратора через аккаунт сайта.</div>
+    </div>
+
+    <div class="form-group">
+      <label>Groq API Key <span style="color:#555">(необязательно, можно добавить позже)</span></label>
+      <input id="inp-groq" type="password" placeholder="gsk_..." />
+      <div class="hint">Получите бесплатный ключ на <a href="#" onclick="openGroq(); return false;" style="color:#818cf8">console.groq.com</a></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="status-row">
+        <span style="font-size:12px; color:#666;">Бекенд будет установлен в:</span>
+      </div>
+      <div class="status-row">
+        <span style="font-family:monospace; font-size:12px; color:#818cf8;">C:\SalesAnalyzer\</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- STEP 2: Install -->
+  <div class="screen" id="screen-2">
+    <h2>Установка</h2>
+    <p>Загружаем Docker-образы и запускаем сервисы...</p>
+    <div class="log-box" id="log-box"></div>
+  </div>
+
+  <!-- STEP 3: Done -->
+  <div class="screen" id="screen-3">
+    <div class="success-icon">✅</div>
+    <h2 style="text-align:center;">Установка завершена!</h2>
+    <p style="text-align:center; margin-top:8px;">Бекенд запущен и работает на порту <strong>3001</strong></p>
+
+    <div class="card" style="margin-top:20px;">
+      <p style="font-size:12px; color:#666; margin-bottom:8px;">IP этого компьютера в локальной сети:</p>
+      <div class="ip-box" id="local-ip">...</div>
+      <p style="font-size:11px; color:#555; margin-top:8px;">
+        Укажите этот адрес в настройках Admin App и Desktop App как BACKEND_URL:<br/>
+        <code style="color:#818cf8">http://&lt;IP&gt;:3001</code>
+      </p>
+    </div>
+
+    <div class="card" style="margin-top:12px;">
+      <p style="font-size:12px; color:#888;">На рабочем столе созданы ярлыки:</p>
+      <div class="status-row"><div class="dot ok"></div> Запустить Sales Backend.bat</div>
+      <div class="status-row"><div class="dot ok"></div> Остановить Sales Backend.bat</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <button class="btn-secondary" id="btn-back" style="display:none;" onclick="goBack()">← Назад</button>
+  <div style="flex:1"></div>
+  <button class="btn-primary" id="btn-next" disabled onclick="goNext()">Далее →</button>
+</div>
+
+<script>
+  let step = 0;
+  let dockerOk = false;
+  let installing = false;
+
+  const screens = document.querySelectorAll(".screen");
+  const tabs    = document.querySelectorAll(".step");
+
+  function showStep(n) {
+    screens.forEach((s, i) => s.classList.toggle("active", i === n));
+    tabs.forEach((t, i) => {
+      t.classList.remove("active", "done");
+      if (i < n)  t.classList.add("done");
+      if (i === n) t.classList.add("active");
+    });
+    document.getElementById("btn-back").style.display = n > 0 && n < 3 ? "inline-block" : "none";
+    step = n;
+  }
+
+  async function goNext() {
+    if (step === 0) { showStep(1); return; }
+    if (step === 1) { startInstall(); return; }
+    if (step === 3) { window.close(); return; }
+  }
+
+  function goBack() {
+    if (step > 0 && step < 3) showStep(step - 1);
+  }
+
+  async function openDockerDownload() {
+    await window.api.openDockerDownload();
+  }
+
+  async function openGroq() {
+    await window.api.openDockerDownload(); // reuse shell.openExternal
+  }
+
+  // ── Step 0: check Docker ──────────────────────────────────────────────────
+  async function checkDocker() {
+    const r = await window.api.checkDocker();
+
+    const dotD  = document.getElementById("dot-docker");
+    const txtD  = document.getElementById("txt-docker");
+    const dotR  = document.getElementById("dot-running");
+    const txtR  = document.getElementById("txt-running");
+    const miss  = document.getElementById("docker-missing");
+    const btn   = document.getElementById("btn-next");
+
+    if (r.installed) {
+      dotD.className = "dot ok";
+      txtD.textContent = "Docker Desktop установлен ✓";
+    } else {
+      dotD.className = "dot bad";
+      txtD.textContent = "Docker Desktop не найден";
+      dotR.className = "dot bad";
+      txtR.textContent = "Docker не запущен";
+      miss.style.display = "block";
+      btn.disabled = true;
+      return;
+    }
+
+    if (r.running) {
+      dotR.className = "dot ok";
+      txtR.textContent = "Docker запущен ✓";
+      dockerOk = true;
+      btn.disabled = false;
+    } else {
+      dotR.className = "dot bad";
+      txtR.textContent = "Docker установлен, но не запущен. Запустите Docker Desktop и подождите.";
+      btn.disabled = true;
+      setTimeout(checkDocker, 4000);
+    }
+  }
+
+  // ── Step 2: install ───────────────────────────────────────────────────────
+  async function startInstall() {
+    showStep(2);
+    installing = true;
+    document.getElementById("btn-next").disabled = true;
+
+    const websiteUrl = document.getElementById("inp-website").value.trim();
+    const groqKey    = document.getElementById("inp-groq").value.trim();
+
+    window.api.onLog(msg => {
+      const box = document.getElementById("log-box");
+      box.textContent += msg + "\n";
+      box.scrollTop = box.scrollHeight;
+    });
+
+    const result = await window.api.installBackend({ websiteUrl, groqKey });
+    installing = false;
+
+    if (result.ok) {
+      // Show local IP on done screen
+      const ip = await window.api.getLocalIp();
+      document.getElementById("local-ip").textContent = `http://${ip}:3001`;
+
+      showStep(3);
+      document.getElementById("btn-next").disabled = false;
+      document.getElementById("btn-next").textContent = "Закрыть";
+    } else {
+      const box = document.getElementById("log-box");
+      box.textContent += "\n❌ Установка не удалась. Проверьте, что Docker запущен и попробуйте снова.";
+      document.getElementById("btn-next").disabled = false;
+      document.getElementById("btn-next").textContent = "Повторить";
+      step = 1; // go back virtually so next click re-runs
+    }
+  }
+
+  // init
+  checkDocker();
+</script>
+</body>
+</html>

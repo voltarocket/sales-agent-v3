@@ -14,10 +14,21 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.sales.admin",
+    "appId":       "com.sales.admin",
     "productName": "Sales Admin",
-    "files": ["src/**/*"],
-    "win":   { "target": "nsis" },
+    "files":       ["src/**/*"],
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick":                          false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut":             true,
+      "createStartMenuShortcut":           true,
+      "shortcutName":                      "Sales Admin",
+      "include":                           "installer.nsh"
+    },
     "mac":   { "target": "dmg" },
     "linux": { "target": "AppImage" }
   }

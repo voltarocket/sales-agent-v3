@@ -3,8 +3,16 @@ const path = require("path");
 const fs   = require("fs");
 const WS   = require("ws");
 
-const BACKEND_WS  = process.env.BACKEND_WS  || "ws://localhost:3001";
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3001";
+// Read BACKEND_URL written by NSIS installer, fallback to env or localhost
+function readInstallerUrl() {
+  try {
+    const cfgPath = path.join(path.dirname(process.execPath), "config", "backend.url");
+    if (fs.existsSync(cfgPath)) return fs.readFileSync(cfgPath, "utf8").trim();
+  } catch (_) {}
+  return null;
+}
+const BACKEND_URL = process.env.BACKEND_URL || readInstallerUrl() || "http://localhost:3001";
+const BACKEND_WS  = process.env.BACKEND_WS  || BACKEND_URL.replace(/^http/, "ws");
 
 let mainWindow = null;
 let wsClient   = null;

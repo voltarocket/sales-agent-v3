@@ -15,10 +15,21 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.sales.analyzer",
+    "appId":       "com.sales.analyzer",
     "productName": "Sales Analyzer",
-    "files": ["src/**/*"],
-    "win":   { "target": "nsis" },
+    "files":       ["src/**/*"],
+    "win": {
+      "target": "nsis",
+      "requestedExecutionLevel": "asInvoker"
+    },
+    "nsis": {
+      "oneClick":                          false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut":             true,
+      "createStartMenuShortcut":           true,
+      "shortcutName":                      "Sales Analyzer",
+      "include":                           "installer.nsh"
+    },
     "mac":   { "target": "dmg" },
     "linux": { "target": "AppImage" }
   }

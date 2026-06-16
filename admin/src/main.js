@@ -2,7 +2,14 @@ const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const fs   = require("fs");
 
-const BACKEND_URL = process.env.BACKEND_URL || "http://localhost:3001";
+function readInstallerUrl() {
+  try {
+    const cfgPath = path.join(path.dirname(process.execPath), "config", "backend.url");
+    if (fs.existsSync(cfgPath)) return fs.readFileSync(cfgPath, "utf8").trim();
+  } catch (_) {}
+  return null;
+}
+const BACKEND_URL = process.env.BACKEND_URL || readInstallerUrl() || "http://localhost:3001";
 
 let mainWindow  = null;
 let adminToken  = null;
