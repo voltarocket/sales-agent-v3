@@ -28,8 +28,6 @@
     "nsis": {
       "oneClick":            false,
       "allowToChangeInstallationDirectory": true,
-      "installerIcon":       "src/icon.ico",
-      "uninstallerIcon":     "src/icon.ico",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
       "shortcutName":        "Sales Backend"
