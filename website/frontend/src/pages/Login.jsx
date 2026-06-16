@@ -1,9 +1,8 @@
 import { useState } from "react";
-import { useNavigate, Link } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { api } from "../App";
 
 export default function Login() {
-  const nav = useNavigate();
   const [form, setForm]   = useState({ email: "", password: "" });
   const [err, setErr]     = useState("");
   const [loading, setLoading] = useState(false);
@@ -13,10 +12,10 @@ export default function Login() {
     setErr(""); setLoading(true);
     try {
       const r = await api("/api/auth/login", { method: "POST", body: form });
-      if (r.error) { setErr(r.error); return; }
+      if (r.error || !r.token) { setErr(r.error || "Ошибка входа"); return; }
       localStorage.setItem("token", r.token);
       localStorage.setItem("user",  JSON.stringify(r.user));
-      nav("/dashboard");
+      window.location.href = "/dashboard";
     } catch { setErr("Ошибка сети"); }
     finally { setLoading(false); }
   }

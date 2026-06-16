@@ -46,7 +46,7 @@ export default function Dashboard() {
             <code style={{overflow: "hidden", textOverflow: "ellipsis"}}>{user?.license_key || "Загрузка..."}</code>
             <button className="copy-btn" onClick={copyKey}>{copied ? "✓" : "Копировать"}</button>
           </div>
-          <p className="text-muted mt-12">Введите этот ключ в настройках локального бэкенда (<code>backend/.env → LICENSE_KEY</code>)</p>
+          <p className="text-muted mt-12">Этот ключ привязан к вашему аккаунту. При входе в Admin App лицензия активируется автоматически.</p>
         </div>
 
         {/* Downloads */}
@@ -73,8 +73,8 @@ export default function Dashboard() {
           {[
             { n: "1", text: "Скачайте и установите Desktop App и Admin App" },
             { n: "2", text: "Скачайте docker-compose.yml и запустите docker compose up -d" },
-            { n: "3", text: `Добавьте ключ лицензии в backend/.env: LICENSE_KEY=${user?.license_key || "..."}` },
-            { n: "4", text: `Войдите в Admin App с вашим email: ${user?.email || "..."}` },
+            { n: "3", text: `Войдите в Admin App с вашим email и паролем — лицензия активируется автоматически` },
+            { n: "4", text: `Войдите в Desktop App с логином менеджера, созданным в Admin App` },
           ].map(s => (
             <div key={s.n} style={{display:"flex", gap:12, marginBottom:12, alignItems:"flex-start"}}>
               <span style={{background:"var(--accent)", borderRadius:"50%", width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center", fontSize:12, fontWeight:700, flexShrink:0}}>{s.n}</span>
