@@ -1,7 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!--
+  Backend работает по http/ws (без TLS) в локальной сети — IP компьютера
+  вводится менеджером на форме входа и может быть любым (192.168.x.x, 10.x.x.x и т.д.).
+  Android с версии 9 блокирует cleartext-трафик по умолчанию, а domain-config
+  не поддерживает wildcard/CIDR для IP-адресов, поэтому cleartext разрешён
+  на уровне base-config — приложение всё равно ходит только на IP, введённый
+  пользователем, в пределах его локальной сети.
+-->
 <network-security-config>
-    <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="true">10.0.2.2</domain>
-        <domain includeSubdomains="true">192.168.1.166</domain>
-    </domain-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system"/>
+        </trust-anchors>
+    </base-config>
 </network-security-config>

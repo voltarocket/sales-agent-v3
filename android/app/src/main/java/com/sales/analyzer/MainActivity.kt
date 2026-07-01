@@ -233,6 +233,7 @@ class MainActivity : ComponentActivity() {
         onSuccess: (token: String, managerId: Int, managerName: String) -> Unit,
     ) {
         val scope = rememberCoroutineScope()
+        var authTab  by remember { mutableIntStateOf(0) }
         var username by remember { mutableStateOf("") }
         var password by remember { mutableStateOf("") }
         var error    by remember { mutableStateOf("") }
@@ -254,78 +255,145 @@ class MainActivity : ComponentActivity() {
                 shape = RoundedCornerShape(16.dp),
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    OutlinedTextField(
-                        value = urlInput, onValueChange = onUrlChange,
-                        label = { Text("Адрес сервера", color = C.text2) },
-                        placeholder = { Text("ws://192.168.1.100:3001", color = C.text3) },
-                        colors = fieldColors(),
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = username, onValueChange = { username = it },
-                        label = { Text("Логин", color = C.text2) },
-                        colors = fieldColors(),
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    )
-                    OutlinedTextField(
-                        value = password, onValueChange = { password = it },
-                        label = { Text("Пароль", color = C.text2) },
-                        visualTransformation = PasswordVisualTransformation(),
-                        colors = fieldColors(),
-                        modifier = Modifier.fillMaxWidth(), singleLine = true,
-                    )
-                    if (error.isNotEmpty()) {
-                        Text(error, color = C.red, fontSize = 12.sp)
+                Column {
+                    TabRow(selectedTabIndex = authTab, containerColor = C.surface, contentColor = C.accent2) {
+                        Tab(selected = authTab == 0, onClick = { authTab = 0 }) {
+                            Text("Вход", Modifier.padding(12.dp))
+                        }
+                        Tab(selected = authTab == 1, onClick = { authTab = 1 }) {
+                            Text("Сервер", Modifier.padding(12.dp))
+                        }
                     }
-                    Button(
-                        onClick = {
-                            if (username.isBlank() || password.isBlank()) {
-                                error = "Введите логин и пароль"; return@Button
+
+                    when (authTab) {
+                        0 -> Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            OutlinedTextField(
+                                value = username, onValueChange = { username = it },
+                                label = { Text("Логин", color = C.text2) },
+                                colors = fieldColors(),
+                                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                            )
+                            OutlinedTextField(
+                                value = password, onValueChange = { password = it },
+                                label = { Text("Пароль", color = C.text2) },
+                                visualTransformation = PasswordVisualTransformation(),
+                                colors = fieldColors(),
+                                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                            )
+                            if (error.isNotEmpty()) {
+                                Text(error, color = C.red, fontSize = 12.sp)
                             }
-                            loading = true; error = ""
-                            scope.launch(Dispatchers.IO) {
-                                try {
-                                    val httpUrl = urlInput
-                                        .replace("ws://", "http://")
-                                        .replace("wss://", "https://")
-                                    val body = JSONObject().apply {
-                                        put("username", username)
-                                        put("password", password)
+                            Button(
+                                onClick = {
+                                    if (username.isBlank() || password.isBlank()) {
+                                        error = "Введите логин и пароль"; return@Button
                                     }
-                                    val resp = OkHttpClient().newCall(
-                                        Request.Builder()
-                                            .url("$httpUrl/api/auth/login")
-                                            .post(body.toString().toRequestBody("application/json".toMediaType()))
-                                            .build()
-                                    ).execute()
-                                    val json = JSONObject(resp.body?.string() ?: "{}")
-                                    if (json.optBoolean("ok") && json.has("token")) {
-                                        val token = json.getString("token")
-                                        val id    = json.getInt("id")
-                                        val name  = json.getString("name")
-                                        withContext(Dispatchers.Main) { onSuccess(token, id, name) }
-                                    } else {
-                                        val msg = json.optString("error", "Ошибка входа")
-                                        withContext(Dispatchers.Main) { error = msg; loading = false }
+                                    loading = true; error = ""
+                                    scope.launch(Dispatchers.IO) {
+                                        try {
+                                            val httpUrl = urlInput
+                                                .replace("ws://", "http://")
+                                                .replace("wss://", "https://")
+                                            val body = JSONObject().apply {
+                                                put("username", username)
+                                                put("password", password)
+                                            }
+                                            val resp = OkHttpClient().newCall(
+                                                Request.Builder()
+                                                    .url("$httpUrl/api/auth/login")
+                                                    .post(body.toString().toRequestBody("application/json".toMediaType()))
+                                                    .build()
+                                            ).execute()
+                                            val json = JSONObject(resp.body?.string() ?: "{}")
+                                            if (json.optBoolean("ok") && json.has("token")) {
+                                                val token = json.getString("token")
+                                                val id    = json.getInt("id")
+                                                val name  = json.getString("name")
+                                                withContext(Dispatchers.Main) { onSuccess(token, id, name) }
+                                            } else {
+                                                val msg = json.optString("error", "Ошибка входа")
+                                                withContext(Dispatchers.Main) { error = msg; loading = false }
+                                            }
+                                        } catch (e: Exception) {
+                                            withContext(Dispatchers.Main) {
+                                                error = "Нет связи с сервером: ${e.message}"
+                                                loading = false
+                                            }
+                                        }
                                     }
-                                } catch (e: Exception) {
-                                    withContext(Dispatchers.Main) {
-                                        error = "Нет связи с сервером: ${e.message}"
-                                        loading = false
-                                    }
-                                }
+                                },
+                                enabled = !loading,
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = C.accent, contentColor = Color(0xFF0A0A0F)),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(if (loading) "Вхожу..." else "Войти",
+                                    fontWeight = FontWeight.SemiBold)
                             }
-                        },
-                        enabled = !loading,
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = C.accent, contentColor = Color(0xFF0A0A0F)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Text(if (loading) "Вхожу..." else "Войти",
-                            fontWeight = FontWeight.SemiBold)
+                        }
+                        1 -> ServerSettingsPane(urlInput = urlInput, onUrlChange = onUrlChange)
                     }
                 }
+            }
+        }
+    }
+
+    // ── Server IP tab (auth screen) ────────────────────────────
+    @Composable
+    fun ServerSettingsPane(urlInput: String, onUrlChange: (String) -> Unit) {
+        val scope = rememberCoroutineScope()
+        var checking by remember { mutableStateOf(false) }
+        var result   by remember { mutableStateOf<String?>(null) }
+        var resultOk by remember { mutableStateOf(false) }
+
+        Column(Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            OutlinedTextField(
+                value = urlInput, onValueChange = { onUrlChange(it); result = null },
+                label = { Text("Адрес сервера", color = C.text2) },
+                placeholder = { Text("ws://192.168.1.100:3001", color = C.text3) },
+                colors = fieldColors(),
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+            )
+            Text("IP компьютера с бэкендом.\nНайти: ipconfig → IPv4 Address",
+                color = C.text3, fontSize = 11.sp)
+
+            OutlinedButton(
+                onClick = {
+                    checking = true; result = null
+                    scope.launch(Dispatchers.IO) {
+                        val httpUrl = urlInput
+                            .replace("ws://", "http://")
+                            .replace("wss://", "https://")
+                        try {
+                            val resp = OkHttpClient().newCall(
+                                Request.Builder().url("$httpUrl/api/health").get().build()
+                            ).execute()
+                            val json = JSONObject(resp.body?.string() ?: "{}")
+                            val dbOk = json.optBoolean("db", false)
+                            withContext(Dispatchers.Main) {
+                                resultOk = resp.isSuccessful && dbOk
+                                result = if (resultOk) "✓ Бэкенд и база данных доступны"
+                                    else if (resp.isSuccessful) "⚠ Бэкенд отвечает, но БД недоступна"
+                                    else "✗ Бэкенд не отвечает (код ${resp.code})"
+                                checking = false
+                            }
+                        } catch (e: Exception) {
+                            withContext(Dispatchers.Main) {
+                                resultOk = false
+                                result = "✗ Нет связи с сервером: ${e.message}"
+                                checking = false
+                            }
+                        }
+                    }
+                },
+                enabled = !checking,
+                colors = ButtonDefaults.outlinedButtonColors(contentColor = C.accent2),
+                border = androidx.compose.foundation.BorderStroke(1.dp, C.border),
+                modifier = Modifier.fillMaxWidth()
+            ) { Text(if (checking) "Проверяю..." else "Проверить подключение") }
+
+            result?.let {
+                Text(it, color = if (resultOk) C.green else C.red, fontSize = 12.sp)
             }
         }
     }

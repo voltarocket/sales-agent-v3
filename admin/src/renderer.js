@@ -1,4 +1,17 @@
 // ═══════════════════════════════════════════════════════════
+// STATS HELPERS (defined before STATE — S.statsRange is initialized from these)
+// ═══════════════════════════════════════════════════════════
+const SEV_COLOR = { high:"#f87171", medium:"#fbbf24", low:"#4ade80" };
+const dstr = d => d.toISOString().slice(0,10);
+
+function defaultStatsRange() {
+  const to   = new Date();
+  const from = new Date(to);
+  from.setDate(from.getDate() - 29); // last 30 days
+  return { from: dstr(from), to: dstr(to) };
+}
+
+// ═══════════════════════════════════════════════════════════
 // STATE
 // ═══════════════════════════════════════════════════════════
 const S = {
@@ -6,13 +19,17 @@ const S = {
   loginError: "",
   loginBusy:  false,
 
-  page:     "managers",   // managers | settings | licenses
+  page:     "managers",   // managers | settings | licenses | stats
   managers: [],
   calls:    [],
   selected: null,
   mgrCalls: [],
   modal:    null,         // null | "add" | "edit" | "delete" | "issue-license" | "edit-plan" | "add-plan"
   pendingDeleteId: null,
+
+  // Stats/analytics page
+  statsRange:     defaultStatsRange(),  // { from: "yyyy-mm-dd", to: "yyyy-mm-dd" } — "" = no bound
+  statsManagerId: "all",
 
   activeAudioCallId: null,
   commentDraft:      {},
@@ -74,6 +91,183 @@ async function loadLicenseStatus() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// STATS / ANALYTICS
+// ═══════════════════════════════════════════════════════════
+function computeStats() {
+  const { from, to } = S.statsRange;
+  const mgrFilter = S.statsManagerId;
+
+  const byDay     = new Map();  // "yyyy-mm-dd" -> {high,medium,low}
+  const byManager = new Map();  // managerId    -> {name,color,high,medium,low,calls}
+  const bySeverity = { high:0, medium:0, low:0 };
+  let totalCalls = 0, callsWithViolations = 0;
+
+  for (const c of S.calls) {
+    // Compared as plain "YYYY-MM-DD" strings — created_at is displayed elsewhere
+    // in the app as a raw slice (see callCard) without Date/timezone conversion,
+    // so bucketing the same way avoids off-by-one days from local<->UTC shifts.
+    const dayKey = (c.created_at || "").slice(0, 10);
+    if (from && dayKey && dayKey < from) continue;
+    if (to   && dayKey && dayKey > to)   continue;
+    if (mgrFilter !== "all" && String(c.manager_id||"") !== String(mgrFilter)) continue;
+
+    totalCalls++;
+    const errs = c.errors || [];
+    if (errs.length) callsWithViolations++;
+
+    let dayRec = null;
+    if (dayKey) {
+      if (!byDay.has(dayKey)) byDay.set(dayKey, { high:0, medium:0, low:0 });
+      dayRec = byDay.get(dayKey);
+    }
+
+    const mgr    = S.managers.find(m => m.id === c.manager_id);
+    const mgrKey = c.manager_id || "unknown";
+    if (!byManager.has(mgrKey)) byManager.set(mgrKey, {
+      name: mgr?.name || "Без менеджера", color: mgr?.color || "#6366f1",
+      high:0, medium:0, low:0, calls:0,
+    });
+    const mgrRec = byManager.get(mgrKey);
+    mgrRec.calls++;
+
+    for (const e of errs) {
+      const sev = e.severity === "high" ? "high" : e.severity === "medium" ? "medium" : "low";
+      if (dayRec) dayRec[sev]++;
+      mgrRec[sev]++;
+      bySeverity[sev]++;
+    }
+  }
+
+  const totalViolations = bySeverity.high + bySeverity.medium + bySeverity.low;
+  return { byDay, byManager, bySeverity, totalCalls, callsWithViolations, totalViolations };
+}
+
+// Pure calendar-date arithmetic on "YYYY-MM-DD" strings via Date.UTC — never
+// touches local timezone, so it can't drift a day off from the string-keyed
+// buckets in computeStats() the way local-Date <-> toISOString round-tripping does.
+function addDaysStr(ymd, n) {
+  const [y, m, d] = ymd.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return dt.toISOString().slice(0, 10);
+}
+
+// Fills the selected date range day-by-day (zeros for empty days) so the bar
+// chart doesn't misleadingly compress gaps. Falls back to sparse known days
+// when no bound is set (e.g. "Всё время"), capped so the SVG stays readable.
+function dayList(byDay, from, to) {
+  if (from && to) {
+    const days = [];
+    const maxDays = 180;
+    let key = from;
+    while (key <= to && days.length < maxDays) {
+      days.push({ key, ...(byDay.get(key) || { high:0, medium:0, low:0 }) });
+      key = addDaysStr(key, 1);
+    }
+    return days;
+  }
+  return [...byDay.entries()]
+    .sort((a,b) => a[0] < b[0] ? -1 : 1)
+    .slice(-60)
+    .map(([key, v]) => ({ key, ...v }));
+}
+
+function svgStackedBars(days) {
+  const w = 900, h = 220, padL = 8, padB = 22, padT = 10, padR = 8;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+  const n = Math.max(days.length, 1);
+  const maxVal = Math.max(1, ...days.map(d => d.high + d.medium + d.low));
+  const slot = chartW / n;
+  const barW = Math.max(1, slot * 0.68);
+
+  let bars = "";
+  days.forEach((d, i) => {
+    const x = padL + i * slot + (slot - barW) / 2;
+    let y = padT + chartH;
+    [["high", d.high], ["medium", d.medium], ["low", d.low]].forEach(([sev, val]) => {
+      if (!val) return;
+      const segH = val / maxVal * chartH;
+      y -= segH;
+      bars += `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${barW.toFixed(1)}" height="${segH.toFixed(1)}" fill="${SEV_COLOR[sev]}" rx="1"/>`;
+    });
+  });
+
+  const gridLines = [0,.25,.5,.75,1].map(f => {
+    const y = padT + chartH * (1-f);
+    return `<line x1="${padL}" y1="${y.toFixed(1)}" x2="${w-padR}" y2="${y.toFixed(1)}" stroke="var(--border)" stroke-width="1"/>`;
+  }).join("");
+
+  const labelEvery = Math.max(1, Math.ceil(days.length / 12));
+  const labels = days.map((d, i) => {
+    if (i % labelEvery !== 0) return "";
+    const x = padL + i * slot + slot/2;
+    return `<text x="${x.toFixed(1)}" y="${h-6}" font-size="9" text-anchor="middle" style="fill:var(--text3)">${d.key.slice(5)}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;display:block">${gridLines}${bars}${labels}</svg>`;
+}
+
+function svgManagerBars(byManager) {
+  const arr = [...byManager.values()]
+    .map(m => ({ ...m, total: m.high + m.medium + m.low }))
+    .sort((a,b) => b.total - a.total)
+    .slice(0, 12);
+  const w = 640, barH = 22, gap = 12, padL = 130, padR = 46;
+  const h = Math.max(1, arr.length) * (barH + gap) + 6;
+  const maxVal = Math.max(1, ...arr.map(m => m.total));
+  const barMaxW = w - padL - padR;
+
+  if (!arr.length) return `<svg viewBox="0 0 ${w} 60"></svg>`;
+
+  const rows = arr.map((m, i) => {
+    const y = i * (barH + gap) + 4;
+    let x = padL;
+    let rects = "";
+    [["high", m.high], ["medium", m.medium], ["low", m.low]].forEach(([sev, val]) => {
+      if (!val) return;
+      const segW = val / maxVal * barMaxW;
+      rects += `<rect x="${x.toFixed(1)}" y="${y}" width="${Math.max(segW,1).toFixed(1)}" height="${barH}" fill="${SEV_COLOR[sev]}" rx="3"/>`;
+      x += segW;
+    });
+    const name = m.name.length > 16 ? m.name.slice(0,15)+"…" : m.name;
+    return `
+<text x="${padL-10}" y="${y+barH/2+4}" font-size="11" text-anchor="end" style="fill:var(--text2)">${esc(name)}</text>
+${rects}
+<text x="${x+6}" y="${y+barH/2+4}" font-size="11" style="fill:var(--text)" font-family="var(--mono)">${m.total}</text>`;
+  }).join("");
+
+  return `<svg viewBox="0 0 ${w} ${h}" style="width:100%;height:${h}px;display:block">${rows}</svg>`;
+}
+
+function svgDonut(bySeverity) {
+  const total = bySeverity.high + bySeverity.medium + bySeverity.low;
+  const size = 160, r = 58, cx = size/2, cy = size/2, sw = 24;
+  if (!total) return `
+<svg viewBox="0 0 ${size} ${size}" style="width:160px;height:160px">
+  <circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="var(--surface2)" stroke-width="${sw}"/>
+  <text x="${cx}" y="${cy+4}" text-anchor="middle" font-size="13" style="fill:var(--text3)">нет данных</text>
+</svg>`;
+
+  const circumference = 2 * Math.PI * r;
+  let offset = 0;
+  const arcs = [["high",bySeverity.high],["medium",bySeverity.medium],["low",bySeverity.low]].map(([sev,val]) => {
+    if (!val) return "";
+    const dash = val/total*circumference;
+    const el = `<circle cx="${cx}" cy="${cy}" r="${r}" fill="none" stroke="${SEV_COLOR[sev]}" stroke-width="${sw}" stroke-dasharray="${dash.toFixed(1)} ${(circumference-dash).toFixed(1)}" stroke-dashoffset="${(-offset).toFixed(1)}" transform="rotate(-90 ${cx} ${cy})"/>`;
+    offset += dash;
+    return el;
+  }).join("");
+
+  return `
+<svg viewBox="0 0 ${size} ${size}" style="width:160px;height:160px">
+  ${arcs}
+  <text x="${cx}" y="${cy-3}" text-anchor="middle" font-size="20" font-weight="700" style="fill:var(--text)">${total}</text>
+  <text x="${cx}" y="${cy+14}" text-anchor="middle" font-size="9" style="fill:var(--text3)">нарушений</text>
+</svg>`;
+}
+
+// ═══════════════════════════════════════════════════════════
 // RENDER
 // ═══════════════════════════════════════════════════════════
 function render() {
@@ -89,7 +283,7 @@ function html() {
   <div class="main">
     ${topbar()}
     <div class="content">
-      ${S.page==="settings" ? pageSettings() : S.page==="licenses" ? pageLicenses() : (S.selected ? pageManagerDetail() : pageManagers())}
+      ${S.page==="settings" ? pageSettings() : S.page==="licenses" ? pageLicenses() : S.page==="stats" ? pageStats() : (S.selected ? pageManagerDetail() : pageManagers())}
     </div>
   </div>
 </div>
@@ -132,6 +326,9 @@ function sidebar() {
       <span class="nicon">◉</span>Менеджеры
       <span class="nbadge">${S.managers.length}</span>
     </div>
+    <div class="nav ${S.page==="stats"?"on":""}" id="nav-stats">
+      <span class="nicon">📊</span>Статистика
+    </div>
     <div class="nav ${S.page==="licenses"?"on":""}" id="nav-licenses">
       <span class="nicon">🔑</span>Лицензии
     </div>
@@ -164,6 +361,10 @@ function topbar() {
   if (S.page === "licenses") return `
 <div class="topbar">
   <div><div class="pt">Лицензия</div><div class="ps">Активация и статус лицензии системы</div></div>
+</div>`;
+  if (S.page === "stats") return `
+<div class="topbar">
+  <div><div class="pt">Статистика нарушений</div><div class="ps">Динамика по датам, менеджерам и критичности</div></div>
 </div>`;
   const title = S.selected ? esc(S.selected.name) : "Менеджеры";
   const sub   = S.selected
@@ -522,6 +723,86 @@ function pageLicenses() {
 }
 
 // ═══════════════════════════════════════════════════════════
+// STATS PAGE
+// ═══════════════════════════════════════════════════════════
+function pageStats() {
+  const stats = computeStats();
+  const days  = dayList(stats.byDay, S.statsRange.from, S.statsRange.to);
+  const pctV  = stats.totalCalls ? Math.round(stats.callsWithViolations / stats.totalCalls * 100) : 0;
+  const perCall = stats.totalCalls ? (stats.totalViolations / stats.totalCalls).toFixed(1) : "0";
+
+  return `
+<div style="display:flex;flex-direction:column;gap:20px">
+
+  <div class="card">
+    <div class="ctitle">Фильтр</div>
+    <div class="stats-filter-row">
+      <div>
+        <label style="margin-top:0">С даты</label>
+        <input id="stats-from" type="date" value="${esc(S.statsRange.from)}"/>
+      </div>
+      <div>
+        <label style="margin-top:0">По дату</label>
+        <input id="stats-to" type="date" value="${esc(S.statsRange.to)}"/>
+      </div>
+      <div>
+        <label style="margin-top:0">Менеджер</label>
+        <select id="stats-mgr">
+          <option value="all" ${S.statsManagerId==="all"?"selected":""}>Все менеджеры</option>
+          ${S.managers.map(m=>`<option value="${m.id}" ${String(S.statsManagerId)===String(m.id)?"selected":""}>${esc(m.name)}</option>`).join("")}
+        </select>
+      </div>
+      <div class="stats-presets">
+        <button class="btn-ghost btn-sm" data-preset="7">7 дней</button>
+        <button class="btn-ghost btn-sm" data-preset="30">30 дней</button>
+        <button class="btn-ghost btn-sm" data-preset="90">90 дней</button>
+        <button class="btn-ghost btn-sm" data-preset="all">Всё время</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="detail-stats" style="grid-template-columns:repeat(4,1fr)">
+    <div class="stat-card"><div class="stat-val">${stats.totalCalls}</div><div class="stat-lbl">Звонков за период</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:#f87171">${stats.totalViolations}</div><div class="stat-lbl">Нарушений</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${pctV>=50?"#f87171":pctV>=20?"#fbbf24":"#4ade80"}">${pctV}%</div><div class="stat-lbl">Звонков с нарушениями</div></div>
+    <div class="stat-card"><div class="stat-val">${perCall}</div><div class="stat-lbl">Среднее на звонок</div></div>
+  </div>
+
+  <div class="card">
+    <div class="ctitle">Нарушения по дням</div>
+    ${days.length ? svgStackedBars(days) : `<div class="empty-sm">Нет данных за выбранный период</div>`}
+    ${sevLegend()}
+  </div>
+
+  <div class="stats-grid-2">
+    <div class="card">
+      <div class="ctitle">Нарушения по менеджерам</div>
+      ${stats.byManager.size ? svgManagerBars(stats.byManager) : `<div class="empty-sm">Нет данных за выбранный период</div>`}
+    </div>
+    <div class="card" style="display:flex;flex-direction:column;align-items:center">
+      <div class="ctitle" style="align-self:flex-start">Распределение по критичности</div>
+      ${svgDonut(stats.bySeverity)}
+      <div class="chart-legend" style="margin-top:10px">
+        <span><i style="background:${SEV_COLOR.high}"></i>Критично · ${stats.bySeverity.high}</span>
+        <span><i style="background:${SEV_COLOR.medium}"></i>Средне · ${stats.bySeverity.medium}</span>
+        <span><i style="background:${SEV_COLOR.low}"></i>Мало · ${stats.bySeverity.low}</span>
+      </div>
+    </div>
+  </div>
+
+</div>`;
+}
+
+function sevLegend() {
+  return `
+<div class="chart-legend" style="margin-top:10px">
+  <span><i style="background:${SEV_COLOR.high}"></i>Критично</span>
+  <span><i style="background:${SEV_COLOR.medium}"></i>Средне</span>
+  <span><i style="background:${SEV_COLOR.low}"></i>Мало</span>
+</div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
 // EVENT BINDING
 // ═══════════════════════════════════════════════════════════
 function bind() {
@@ -547,6 +828,9 @@ function bind() {
   document.getElementById("nav-licenses")?.addEventListener("click", () => {
     S.page="licenses"; S.selected=null; S.mgrCalls=[]; render();
     loadLicenseStatus();
+  });
+  document.getElementById("nav-stats")?.addEventListener("click", () => {
+    S.page="stats"; S.selected=null; S.mgrCalls=[]; render();
   });
   document.getElementById("btn-back")?.addEventListener("click", () => {
     S.selected=null; S.mgrCalls=[]; S.activeAudioCallId=null; render();
@@ -635,6 +919,22 @@ function bind() {
       render();
     })
   );
+
+  // ── Stats page ─────────────────────────────────────────────
+  document.getElementById("stats-from")?.addEventListener("change", e => { S.statsRange.from = e.target.value; render(); });
+  document.getElementById("stats-to")?.addEventListener("change",   e => { S.statsRange.to   = e.target.value; render(); });
+  document.getElementById("stats-mgr")?.addEventListener("change",  e => { S.statsManagerId  = e.target.value; render(); });
+  document.querySelectorAll("[data-preset]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const p = btn.dataset.preset;
+      if (p === "all") { S.statsRange = { from:"", to:"" }; render(); return; }
+      const to   = new Date();
+      const from = new Date(to);
+      from.setDate(from.getDate() - (parseInt(p) - 1));
+      S.statsRange = { from: dstr(from), to: dstr(to) };
+      render();
+    });
+  });
 
   // ── Licenses page ─────────────────────────────────────────
   document.getElementById("lic-key-input")?.addEventListener("input", e => { S.activateKey = e.target.value; });
@@ -968,6 +1268,17 @@ code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:2
 .lic-dev{background:rgba(99,102,241,.12);color:#a5b4fc}
 .lic-bar-track{flex:1;height:6px;background:var(--surface2);border-radius:3px;overflow:hidden;min-width:60px}
 .lic-bar-fill{height:100%;border-radius:3px;transition:width .4s}
+
+/* Stats / analytics page */
+.stats-filter-row{display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end}
+.stats-filter-row>div{min-width:0}
+.stats-filter-row input[type=date],.stats-filter-row select{width:auto;min-width:150px}
+.stats-presets{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
+.stats-grid-2{display:grid;grid-template-columns:1.5fr 1fr;gap:20px}
+@media (max-width:900px){.stats-grid-2{grid-template-columns:1fr}}
+.chart-legend{display:flex;gap:16px;flex-wrap:wrap;margin-top:10px;font-size:12px;color:var(--text2)}
+.chart-legend span{display:inline-flex;align-items:center;gap:6px}
+.chart-legend i{width:10px;height:10px;border-radius:3px;display:inline-block}
 
 /* Misc */
 .empty{text-align:center;padding:60px 20px;color:var(--text3);font-size:13px}
