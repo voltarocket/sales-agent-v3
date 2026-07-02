@@ -176,6 +176,18 @@ async def admin_login(req: Request):
     sessions[token] = "admin"
     return {"ok": True, "token": token}
 
+@app.put("/api/admin/credentials")
+async def admin_update_credentials(req: Request):
+    _require_admin(req)
+    global ADMIN_USER, ADMIN_PASS
+    b = await req.json()
+    new_user = (b.get("username") or "").strip()
+    new_pass = b.get("password") or ""
+    if not new_user or not new_pass:
+        raise HTTPException(400, {"error": "username и password обязательны"})
+    ADMIN_USER, ADMIN_PASS = new_user, new_pass
+    return {"ok": True}
+
 @app.get("/api/admin/users")
 async def admin_users(req: Request):
     _require_admin(req)
