@@ -21,6 +21,7 @@ load_dotenv()
 PORT        = int(os.getenv("PORT", "3001"))
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://sales:sales_pass@localhost:5432/sales_agent")
 GLOBAL_URL   = os.getenv("GLOBAL_BACKEND_URL", "http://localhost:3002")
+WEBSITE_URL  = os.getenv("WEBSITE_URL", "http://localhost:3003")
 
 # ═══════════════════════════════════════════════════════════
 # FFMPEG  (local — only for PCM → WAV pre-processing)
@@ -987,6 +988,37 @@ async def settings_update(key: str, req: Request):
         key, str(b.get("value", "")),
     )
     return {"ok": True}
+
+# ═══════════════════════════════════════════════════════════
+# AUTH — proxy admin login/credentials to website
+# ═══════════════════════════════════════════════════════════
+
+@app.post("/api/auth/admin")
+async def auth_admin_login(req: Request):
+    body = await req.json()
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.post(f"{WEBSITE_URL}/api/admin/login", json=body)
+    try:
+        data = r.json()
+    except Exception:
+        data = {}
+    if not r.is_success:
+        raise HTTPException(r.status_code, {"error": data.get("error") or "Неверный логин или пароль"})
+    return data
+
+@app.put("/api/auth/admin")
+async def auth_admin_update(req: Request):
+    body = await req.json()
+    headers = {"x-admin-token": req.headers.get("x-auth-token", "")}
+    async with httpx.AsyncClient(timeout=10) as client:
+        r = await client.put(f"{WEBSITE_URL}/api/admin/credentials", json=body, headers=headers)
+    try:
+        data = r.json()
+    except Exception:
+        data = {}
+    if not r.is_success:
+        raise HTTPException(r.status_code, {"error": data.get("error") or "Не удалось обновить данные"})
+    return data
 
 # ═══════════════════════════════════════════════════════════
 # NOTIFICATIONS
