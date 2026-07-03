@@ -37,10 +37,6 @@ const S = {
 
   form:     { name:"", username:"", password:"", color:"#6366f1" },
   editForm: { name:"", username:"", password:"", color:"" },
-  settingsForm: { username:"", password:"", password2:"", threshold:"" },
-  settingsError: "",
-  settingsDone:  false,
-  settingsBusy:  false,
   formError: "",
   formBusy:  false,
 
@@ -300,9 +296,10 @@ function loginPage() {
       <div class="logo-h">Администратор</div>
     </div>
     <div class="login-title">Вход администратора</div>
+    <p style="font-size:13px;color:var(--text2);margin-bottom:14px">Войдите с email и паролем от вашего аккаунта на сайте.</p>
     ${S.loginError ? `<div class="alert-red" style="margin-bottom:14px">${esc(S.loginError)}</div>` : ""}
-    <label>Логин</label>
-    <input id="login-username" type="text" placeholder="admin" autocomplete="username"/>
+    <label>Email</label>
+    <input id="login-email" type="email" placeholder="you@example.com" autocomplete="username"/>
     <label>Пароль</label>
     <input id="login-password" type="password" placeholder="••••••" autocomplete="current-password"/>
     <button class="btn-primary btn-full ${S.loginBusy?"disabled":""}" id="btn-login" ${S.loginBusy?"disabled":""} style="margin-top:20px">
@@ -543,7 +540,6 @@ function callCard(c) {
 
 // ── Settings page ──────────────────────────────────────────
 function pageSettings() {
-  const f = S.settingsForm;
   return `
 <div style="display:flex;flex-direction:column;gap:18px;max-width:440px">
   <div class="card">
@@ -554,21 +550,8 @@ function pageSettings() {
     <button class="btn-primary" id="btn-save-threshold" style="margin-top:14px">Сохранить порог</button>
   </div>
   <div class="card">
-    <div class="ctitle">Сменить логин и пароль администратора</div>
-    ${S.settingsDone ? `<div class="alert-green" style="margin-bottom:14px">✓ Сохранено успешно</div>` : ""}
-    ${S.settingsError ? `<div class="alert-red" style="margin-bottom:14px">${esc(S.settingsError)}</div>` : ""}
-    <label>Новый логин</label>
-    <input id="s-username" type="text" placeholder="admin" value="${esc(f.username)}"/>
-    <label>Новый пароль</label>
-    <input id="s-password" type="password" placeholder="Минимум 4 символа" value="${esc(f.password)}"/>
-    <label>Повторите пароль</label>
-    <input id="s-password2" type="password" placeholder="Повторите пароль" value="${esc(f.password2)}"/>
-    <button class="btn-primary btn-full ${S.settingsBusy?"disabled":""}" id="btn-save-settings" ${S.settingsBusy?"disabled":""} style="margin-top:20px">
-      ${S.settingsBusy?`<span class="spinner"></span> Сохраняю...`:"Сохранить учётные данные"}
-    </button>
-    <div style="margin-top:12px;font-size:12px;color:var(--text3)">
-      По умолчанию: логин <code>admin</code>, пароль <code>admin</code>
-    </div>
+    <div class="ctitle">Доступ администратора</div>
+    <p style="font-size:13px;color:var(--text2)">Вход в админ-панель выполняется через ваш аккаунт на сайте (email и пароль). Чтобы сменить пароль, используйте настройки аккаунта на сайте.</p>
   </div>
 </div>`;
 }
@@ -808,11 +791,12 @@ function sevLegend() {
 function bind() {
   // Login
   document.getElementById("btn-login")?.addEventListener("click", doLogin);
-  document.getElementById("login-username")?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
+  document.getElementById("login-email")?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
   document.getElementById("login-password")?.addEventListener("keydown", e => { if(e.key==="Enter") doLogin(); });
 
   // Logout
   document.getElementById("btn-logout")?.addEventListener("click", async () => {
+    await window.api.post("/api/auth/logout").catch(()=>{});
     await window.api.setToken(null);
     S.token=null; S.managers=[]; S.calls=[]; S.selected=null; render();
   });
@@ -822,8 +806,7 @@ function bind() {
     S.page="managers"; S.selected=null; S.mgrCalls=[]; render();
   });
   document.getElementById("nav-settings")?.addEventListener("click", () => {
-    S.page="settings"; S.selected=null; S.mgrCalls=[];
-    S.settingsForm={username:"",password:"",password2:""}; S.settingsError=""; S.settingsDone=false; render();
+    S.page="settings"; S.selected=null; S.mgrCalls=[]; render();
   });
   document.getElementById("nav-licenses")?.addEventListener("click", () => {
     S.page="licenses"; S.selected=null; S.mgrCalls=[]; render();
@@ -843,26 +826,6 @@ function bind() {
     await window.api.put("/api/settings", { violations_threshold: t });
     S.threshold = t;
     render();
-  });
-
-  // Settings — admin credentials
-  document.getElementById("s-username")?.addEventListener("input",   e => { S.settingsForm.username=e.target.value; });
-  document.getElementById("s-password")?.addEventListener("input",   e => { S.settingsForm.password=e.target.value; });
-  document.getElementById("s-password2")?.addEventListener("input",  e => { S.settingsForm.password2=e.target.value; });
-  document.getElementById("btn-save-settings")?.addEventListener("click", async () => {
-    const username  = document.getElementById("s-username")?.value.trim()||"";
-    const password  = document.getElementById("s-password")?.value||"";
-    const password2 = document.getElementById("s-password2")?.value||"";
-    if (!username)              { S.settingsError="Введите логин"; render(); return; }
-    if (!password)              { S.settingsError="Введите пароль"; render(); return; }
-    if (password.length < 4)    { S.settingsError="Пароль минимум 4 символа"; render(); return; }
-    if (password !== password2) { S.settingsError="Пароли не совпадают"; render(); return; }
-    S.settingsBusy=true; S.settingsError=""; S.settingsDone=false; render();
-    const res = await window.api.put("/api/auth/admin", { username, password });
-    S.settingsBusy=false;
-    if (res?.error) { S.settingsError=res.error; render(); return; }
-    S.settingsDone=true; S.settingsForm={username:"",password:"",password2:""}; render();
-    setTimeout(()=>{ S.settingsDone=false; render(); }, 3000);
   });
 
   // Add manager button
@@ -1073,11 +1036,11 @@ async function openManagerDetail(mgrId) {
 // AUTH
 // ═══════════════════════════════════════════════════════════
 async function doLogin() {
-  const username = document.getElementById("login-username")?.value.trim()||"";
+  const email    = document.getElementById("login-email")?.value.trim()||"";
   const password = document.getElementById("login-password")?.value||"";
-  if (!username || !password) { S.loginError="Введите логин и пароль"; render(); return; }
+  if (!email || !password) { S.loginError="Введите email и пароль"; render(); return; }
   S.loginBusy=true; S.loginError=""; render();
-  const res = await window.api.post("/api/auth/admin", { username, password });
+  const res = await window.api.post("/api/auth/admin", { email, password });
   S.loginBusy=false;
   if (res?.error || !res?.token) {
     S.loginError = res?.error||"Неверный логин или пароль"; render(); return;

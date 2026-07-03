@@ -1,8 +1,10 @@
 import asyncio
 import datetime
+import hashlib
 import json
 import os
 import random
+import secrets
 import socket
 import string
 import subprocess
@@ -15,6 +17,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 load_dotenv()
 
@@ -106,6 +109,16 @@ def set_job(job_id: str, status: str, data: Any = None) -> None:
 def get_job(job_id: str) -> Optional[dict]:
     val = _cache_get(f"job:{job_id}")
     return json.loads(val) if val else None
+
+# ═══════════════════════════════════════════════════════════
+# AI JOB QUEUE  (bounds concurrent transcription/analysis calls)
+# ═══════════════════════════════════════════════════════════
+
+AI_CONCURRENCY = int(os.getenv("AI_CONCURRENCY", "3"))
+_ai_semaphore  = asyncio.Semaphore(AI_CONCURRENCY)
+_ai_waiting    = 0
+_ai_running    = 0
+print(f"[Queue] AI concurrency: {AI_CONCURRENCY}  (env AI_CONCURRENCY to change)")
 
 # ═══════════════════════════════════════════════════════════
 # DATABASE
@@ -422,6 +435,31 @@ async def process_session(session: dict, duration: int) -> dict:
         "analysis":   analysis,
     }
 
+async def _run_ai_job(websocket: WebSocket, job_id: str, session: dict, duration: int) -> None:
+    """Runs process_session under the AI concurrency semaphore, without blocking
+    the caller's WebSocket receive loop (fire-and-forget via asyncio.create_task)."""
+    global _ai_waiting, _ai_running
+    async with _ai_semaphore:
+        _ai_waiting = max(0, _ai_waiting - 1)
+        _ai_running += 1
+        set_job(job_id, "processing")
+        print(f"[Queue] {job_id} started  (running={_ai_running})")
+        try:
+            await websocket.send_text(json.dumps({"type": "processing", "jobId": job_id}))
+            result = await process_session(session, duration)
+            set_job(job_id, "done", {"callId": result["callId"]})
+            await websocket.send_text(json.dumps({"type": "call_analyzed", **result}, default=str, ensure_ascii=False))
+            print(f"[Queue] {job_id} done → callId={result['callId']} score={result.get('analysis', {}).get('score')}")
+        except Exception as e:
+            print(f"[Queue] {job_id} error: {e}")
+            set_job(job_id, "error", {"error": str(e)})
+            try:
+                await websocket.send_text(json.dumps({"type": "error", "error": str(e), "jobId": job_id}))
+            except Exception:
+                pass
+        finally:
+            _ai_running -= 1
+
 # ═══════════════════════════════════════════════════════════
 # LIFESPAN
 # ═══════════════════════════════════════════════════════════
@@ -456,6 +494,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    # Routes raise HTTPException(status, {"error": "..."}) — FastAPI's default handler
+    # wraps that dict as {"detail": {...}}, hiding the message from clients that read
+    # res.error directly. Unwrap dict details back to the top level.
+    content = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+    return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
 
 # ═══════════════════════════════════════════════════════════
 # WEBSOCKET — audio streaming sessions
@@ -503,22 +549,23 @@ async def websocket_endpoint(websocket: WebSocket):
 
             elif msg.get("type") == "call_end" and session_id and session_id in sessions:
                 print(f"[WS] call_end → {session_id}")
-                session = sessions.pop(session_id)
-                await websocket.send_text(json.dumps({"type": "processing"}))
+                session  = sessions.pop(session_id)
+                duration = round(time.time() - session["startTime"])
+                job_id   = session_id
 
-                job_id = session_id
-                set_job(job_id, "processing")
+                global _ai_waiting
+                queue_pos   = _ai_waiting  # jobs waiting (not counting running)
+                _ai_waiting += 1
+                set_job(job_id, "queued", {"position": queue_pos})
 
-                try:
-                    duration = round(time.time() - session["startTime"])
-                    result   = await process_session(session, duration)
-                    set_job(job_id, "done", {"callId": result["callId"]})
-                    await websocket.send_text(json.dumps({"type": "call_analyzed", **result}, default=str, ensure_ascii=False))
-                    print(f"[WS] done → callId={result['callId']} score={result.get('analysis', {}).get('score')}")
-                except Exception as e:
-                    print(f"[WS] processing error: {e}")
-                    set_job(job_id, "error", {"error": str(e)})
-                    await websocket.send_text(json.dumps({"type": "error", "error": str(e)}))
+                if queue_pos > 0:
+                    await websocket.send_text(json.dumps({"type": "queued", "position": queue_pos, "jobId": job_id}))
+                    print(f"[Queue] {job_id} queued (position {queue_pos}, running {_ai_running})")
+                else:
+                    await websocket.send_text(json.dumps({"type": "processing", "jobId": job_id}))
+
+                # Runs under the AI concurrency semaphore without blocking this WS loop
+                asyncio.create_task(_run_ai_job(websocket, job_id, session, duration))
 
                 session_id = None
 
@@ -568,6 +615,20 @@ async def health():
             "wsPort":    os.getenv("FREEPBX_WS_PORT", "8088"),
             "extension": os.getenv("FREEPBX_EXTENSION", "not set"),
         },
+        "queue": {
+            "waiting":     _ai_waiting,
+            "running":     _ai_running,
+            "concurrency": AI_CONCURRENCY,
+        },
+    }
+
+@app.get("/api/queue/status")
+async def queue_status():
+    return {
+        "waiting":     _ai_waiting,
+        "running":     _ai_running,
+        "concurrency": AI_CONCURRENCY,
+        "idle":        _ai_waiting == 0 and _ai_running == 0,
     }
 
 # ═══════════════════════════════════════════════════════════
@@ -909,38 +970,72 @@ async def contacts_delete(contact_id: int):
 
 @app.get("/api/managers")
 async def managers_list():
-    rows = await pool.fetch("SELECT * FROM managers ORDER BY id")
+    rows = await pool.fetch(
+        "SELECT id, name, username, avatar, color, violations, calls_count, avg_score FROM managers ORDER BY id"
+    )
+    return [dict(r) for r in rows]
+
+@app.get("/api/managers/{mgr_id}/calls")
+async def managers_calls(mgr_id: int):
+    rows = await pool.fetch("SELECT * FROM calls WHERE manager_id=$1 ORDER BY created_at DESC", mgr_id)
     return [dict(r) for r in rows]
 
 @app.post("/api/managers")
 async def managers_create(req: Request):
-    b      = await req.json()
-    name   = b.get("name", "").strip()
-    color  = b.get("color", "#6366f1")
+    _require_admin(req)
+    b        = await req.json()
+    name     = (b.get("name") or "").strip()
+    username = (b.get("username") or "").strip()
+    password = b.get("password") or ""
+    color    = b.get("color", "#6366f1")
+    if not name:
+        raise HTTPException(400, {"error": "Имя обязательно"})
+    if not username:
+        raise HTTPException(400, {"error": "Логин обязателен"})
+    if not password:
+        raise HTTPException(400, {"error": "Пароль обязателен"})
+    dup = await pool.fetchrow("SELECT id FROM managers WHERE username=$1", username)
+    if dup:
+        raise HTTPException(400, {"error": "Логин уже занят"})
     avatar = "".join(w[0].upper() for w in name.split() if w)[:2]
     row = await pool.fetchrow(
-        "INSERT INTO managers (name, avatar, color) VALUES ($1,$2,$3) RETURNING *",
-        name, avatar, color,
+        "INSERT INTO managers (name, username, password_hash, avatar, color) VALUES ($1,$2,$3,$4,$5) RETURNING id",
+        name, username, _hash_pw(password), avatar, color,
     )
     return {"ok": True, "id": row["id"]}
 
 @app.put("/api/managers/{mgr_id}")
 async def managers_update(mgr_id: int, req: Request):
+    _require_admin(req)
     existing = await pool.fetchrow("SELECT * FROM managers WHERE id=$1", mgr_id)
     if not existing:
         raise HTTPException(404, {"error": "Not found"})
-    b = await req.json()
-    await pool.execute(
-        "UPDATE managers SET name=$1, color=$2, avatar=$3 WHERE id=$4",
-        b.get("name")   if b.get("name")   is not None else existing["name"],
-        b.get("color")  if b.get("color")  is not None else existing["color"],
-        b.get("avatar") if b.get("avatar") is not None else existing["avatar"],
-        existing["id"],
-    )
+    b        = await req.json()
+    username = (b.get("username") or "").strip()
+    password = b.get("password") or ""
+    if username:
+        dup = await pool.fetchrow("SELECT id FROM managers WHERE username=$1 AND id<>$2", username, mgr_id)
+        if dup:
+            raise HTTPException(400, {"error": "Логин уже занят"})
+    new_name   = (b.get("name") or "").strip() or existing["name"]
+    new_color  = b.get("color")  if b.get("color")  is not None else existing["color"]
+    new_avatar = b.get("avatar") if b.get("avatar") is not None else existing["avatar"]
+    new_username = username or existing["username"]
+    if password:
+        await pool.execute(
+            "UPDATE managers SET name=$1, color=$2, avatar=$3, username=$4, password_hash=$5 WHERE id=$6",
+            new_name, new_color, new_avatar, new_username, _hash_pw(password), existing["id"],
+        )
+    else:
+        await pool.execute(
+            "UPDATE managers SET name=$1, color=$2, avatar=$3, username=$4 WHERE id=$5",
+            new_name, new_color, new_avatar, new_username, existing["id"],
+        )
     return {"ok": True}
 
 @app.delete("/api/managers/{mgr_id}")
-async def managers_delete(mgr_id: int):
+async def managers_delete(mgr_id: int, req: Request):
+    _require_admin(req)
     await pool.execute("DELETE FROM managers WHERE id=$1", mgr_id)
     return {"ok": True}
 
@@ -964,7 +1059,8 @@ async def managers_stats(mgr_id: int, req: Request):
     return {"ok": True}
 
 @app.delete("/api/managers/{mgr_id}/reset")
-async def managers_reset(mgr_id: int):
+async def managers_reset(mgr_id: int, req: Request):
+    _require_admin(req)
     await pool.execute(
         "UPDATE managers SET violations=0, calls_count=0, avg_score=NULL WHERE id=$1",
         mgr_id,
@@ -980,8 +1076,20 @@ async def settings_list():
     rows = await pool.fetch("SELECT key, value FROM settings")
     return {r["key"]: r["value"] for r in rows}
 
+@app.put("/api/settings")
+async def settings_update_bulk(req: Request):
+    _require_admin(req)
+    b = await req.json()
+    for key, value in b.items():
+        await pool.execute(
+            "INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2",
+            key, str(value),
+        )
+    return {"ok": True}
+
 @app.put("/api/settings/{key}")
 async def settings_update(key: str, req: Request):
+    _require_admin(req)
     b = await req.json()
     await pool.execute(
         "INSERT INTO settings (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value=$2",
@@ -990,35 +1098,104 @@ async def settings_update(key: str, req: Request):
     return {"ok": True}
 
 # ═══════════════════════════════════════════════════════════
-# AUTH — proxy admin login/credentials to website
+# AUTH
+#   Manager login  → validated against the local `managers` table
+#                     (credentials issued by the admin from the admin panel).
+#   Admin login    → validated against the website account (website_users),
+#                     never a hardcoded login/password.
 # ═══════════════════════════════════════════════════════════
+
+manager_sessions: dict[str, int] = {}   # token → manager id
+admin_sessions:   set[str]       = set()
+
+def _hash_pw(pw: str) -> str:
+    return hashlib.sha256(pw.encode()).hexdigest()
+
+def _gen_token() -> str:
+    return secrets.token_hex(32)
+
+def _require_manager(req: Request) -> int:
+    token = req.headers.get("x-auth-token")
+    if not token or token not in manager_sessions:
+        raise HTTPException(401, {"error": "Unauthorized"})
+    return manager_sessions[token]
+
+def _require_admin(req: Request) -> None:
+    token = req.headers.get("x-auth-token")
+    if not token or token not in admin_sessions:
+        raise HTTPException(401, {"error": "Unauthorized"})
+
+@app.post("/api/auth/login")
+async def auth_manager_login(req: Request):
+    body     = await req.json()
+    username = (body.get("username") or "").strip()
+    password = body.get("password") or ""
+    if not username or not password:
+        raise HTTPException(400, {"error": "Логин и пароль обязательны"})
+    mgr = await pool.fetchrow(
+        "SELECT * FROM managers WHERE username=$1 AND password_hash=$2",
+        username, _hash_pw(password),
+    )
+    if not mgr:
+        raise HTTPException(401, {"error": "Неверный логин или пароль"})
+    token = _gen_token()
+    manager_sessions[token] = mgr["id"]
+    safe = {k: v for k, v in dict(mgr).items() if k != "password_hash"}
+    return {"ok": True, "token": token, **safe}
+
+@app.get("/api/auth/me")
+async def auth_manager_me(req: Request):
+    mgr_id = _require_manager(req)
+    mgr = await pool.fetchrow("SELECT * FROM managers WHERE id=$1", mgr_id)
+    if not mgr:
+        raise HTTPException(401, {"error": "Unauthorized"})
+    return {k: v for k, v in dict(mgr).items() if k != "password_hash"}
 
 @app.post("/api/auth/admin")
 async def auth_admin_login(req: Request):
-    body = await req.json()
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.post(f"{WEBSITE_URL}/api/admin/login", json=body)
-    try:
-        data = r.json()
-    except Exception:
-        data = {}
-    if not r.is_success:
-        raise HTTPException(r.status_code, {"error": data.get("error") or "Неверный логин или пароль"})
-    return data
+    body     = await req.json()
+    email    = (body.get("email") or "").strip().lower()
+    password = body.get("password") or ""
+    if not email or not password:
+        raise HTTPException(400, {"error": "Email и пароль обязательны"})
 
-@app.put("/api/auth/admin")
-async def auth_admin_update(req: Request):
-    body = await req.json()
-    headers = {"x-admin-token": req.headers.get("x-auth-token", "")}
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.put(f"{WEBSITE_URL}/api/admin/credentials", json=body, headers=headers)
     try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            r = await client.post(f"{WEBSITE_URL}/api/auth/verify", json={"email": email, "password": password})
         data = r.json()
     except Exception:
-        data = {}
-    if not r.is_success:
-        raise HTTPException(r.status_code, {"error": data.get("error") or "Не удалось обновить данные"})
-    return data
+        raise HTTPException(503, {"error": "Сайт недоступен. Проверьте подключение."})
+
+    if not data.get("ok"):
+        raise HTTPException(401, {"error": data.get("error") or "Неверный email или пароль"})
+
+    website_user = data["user"]
+
+    # Auto-activate license if the account has one and it's not yet set locally
+    license_key = website_user.get("license_key")
+    if license_key and not license_state["valid"]:
+        try:
+            await activate_license(license_key)
+            print(f"[LICENSE] auto-activated from website account: {license_key}")
+        except Exception as e:
+            print(f"[LICENSE] auto-activation failed: {e}")
+
+    token = _gen_token()
+    admin_sessions.add(token)
+    return {
+        "ok": True,
+        "token": token,
+        "email": website_user.get("email"),
+        "name": website_user.get("name"),
+        "license_key": license_key,
+    }
+
+@app.post("/api/auth/logout")
+async def auth_logout(req: Request):
+    token = req.headers.get("x-auth-token")
+    manager_sessions.pop(token, None)
+    admin_sessions.discard(token)
+    return {"ok": True}
 
 # ═══════════════════════════════════════════════════════════
 # NOTIFICATIONS
@@ -1054,6 +1231,39 @@ async def notify(req: Request):
 
     print(f"[NOTIFY] {manager_name}: {violations}/{threshold}")
     return {"ok": True, "mode": "console"}
+
+@app.post("/api/notify-check")
+async def notify_check(req: Request):
+    b          = await req.json()
+    manager_id = b.get("managerId")
+    if not manager_id:
+        return {"ok": True}
+    try:
+        mgr = await pool.fetchrow("SELECT * FROM managers WHERE id=$1", manager_id)
+        if not mgr:
+            return {"ok": True}
+        setting   = await pool.fetchrow("SELECT value FROM settings WHERE key='violations_threshold'")
+        threshold = int(setting["value"]) if setting and setting["value"] else 5
+        if mgr["violations"] > 0 and mgr["violations"] % threshold == 0:
+            token = os.getenv("TELEGRAM_BOT_TOKEN")
+            chat  = os.getenv("TELEGRAM_CHAT_ID")
+            if token and chat:
+                async with httpx.AsyncClient(timeout=10) as client:
+                    await client.post(
+                        f"https://api.telegram.org/bot{token}/sendMessage",
+                        json={
+                            "chat_id":    chat,
+                            "text": (
+                                f"⚠️ *Sales Alert*\n"
+                                f"Менеджер *{mgr['name']}*: *{mgr['violations']}/{threshold}* нарушений\n"
+                                f"🕐 {datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
+                            ),
+                            "parse_mode": "Markdown",
+                        },
+                    )
+    except Exception:
+        pass
+    return {"ok": True}
 
 # ═══════════════════════════════════════════════════════════
 # ENTRY POINT

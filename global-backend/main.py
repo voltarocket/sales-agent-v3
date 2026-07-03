@@ -13,6 +13,7 @@ import httpx
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 load_dotenv()
 
@@ -456,6 +457,14 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    # Routes raise HTTPException(status, {"error": "..."}) — FastAPI's default handler
+    # wraps that dict as {"detail": {...}}, hiding the message from clients that read
+    # res.error directly. Unwrap dict details back to the top level.
+    content = exc.detail if isinstance(exc.detail, dict) else {"error": str(exc.detail)}
+    return JSONResponse(status_code=exc.status_code, content=content, headers=exc.headers)
 
 # ═══════════════════════════════════════════════════════════
 # ADMIN AUTH
