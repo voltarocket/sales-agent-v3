@@ -54,7 +54,7 @@
 │                                                                  │
 │  ┌─────────────────────────────────────┐                        │
 │  │  LOCAL BACKEND  :3001               │  ← один на офис        │
-│  │  Node.js/Express + PostgreSQL       │                        │
+│  │  Python/FastAPI + PostgreSQL        │                        │
 │  │  Менеджеры, звонки, контакты, Auth  │                        │
 │  └───────┬──────────────────┬──────────┘                        │
 │          │ WebSocket        │ HTTP                               │
@@ -82,19 +82,16 @@
 ```
 sales-agent-v3/
 │
-├── backend/                    ← Локальный бэкенд (Node.js/Express :3001)
-│   ├── server.js               ← Весь API: Auth, звонки, контакты, менеджеры, WebSocket
-│   ├── db.js                   ← PostgreSQL pool
-│   ├── redis.js                ← In-memory кэш
-│   ├── license.js              ← Лицензионная логика
+├── backend/                    ← Локальный бэкенд (Python/FastAPI :3001)
+│   ├── main.py                 ← Весь API: Auth, звонки, контакты, менеджеры, WebSocket, AI-очередь
 │   ├── init.sql                ← Схема БД (применяется при первом запуске Docker)
-│   ├── requirements.txt        ← Python зависимости (main.py — опциональный)
+│   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
 │
-├── global-backend/             ← Глобальный бэкенд (Node.js + Python :3002)
-│   ├── server.js               ← /process, /analyze, /licenses, license guard
-│   ├── main.py                 ← AI логика: Groq Whisper, LLM анализ
+├── global-backend/             ← Глобальный бэкенд (Python/FastAPI :3002)
+│   ├── main.py                 ← /process, /analyze, /licenses, license guard, AI логика (Groq Whisper, LLM анализ)
+│   ├── requirements.txt
 │   ├── Dockerfile
 │   └── .env.example
 │
@@ -458,9 +455,9 @@ cd installer && npm install && npm run build   # → installer/dist/
 # PostgreSQL должен быть запущен локально
 psql -U sales -d sales_agent -f backend/init.sql
 
-# Node.js бэкенды:
-cd backend        && node server.js   # :3001
-cd global-backend && node server.js   # :3002
+# Python бэкенды (FastAPI):
+cd backend        && python main.py   # :3001
+cd global-backend && python main.py   # :3002
 
 # Website:
 cd website/backend  && python main.py   # :3003

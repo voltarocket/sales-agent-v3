@@ -200,7 +200,7 @@ class MainActivity : ComponentActivity() {
                                     OkHttpClient().newCall(
                                         Request.Builder()
                                             .url("$httpUrl/api/auth/logout")
-                                            .addHeader("Authorization", "Bearer ${AppSession.authToken}")
+                                            .addHeader("x-auth-token", AppSession.authToken)
                                             .post("{}".toRequestBody("application/json".toMediaType()))
                                             .build()
                                     ).execute()

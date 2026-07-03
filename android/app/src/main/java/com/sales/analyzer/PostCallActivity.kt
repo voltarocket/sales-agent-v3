@@ -198,7 +198,7 @@ class PostCallActivity : ComponentActivity() {
         client.newCall(
             Request.Builder()
                 .url("$backendUrl/api/calls")
-                .addHeader("Authorization", "Bearer $authToken")
+                .addHeader("x-auth-token", authToken)
                 .post(callBody.toString().toRequestBody("application/json".toMediaType()))
                 .build()
         ).enqueue(object : Callback {
@@ -223,7 +223,7 @@ class PostCallActivity : ComponentActivity() {
             OkHttpClient().newCall(
                 Request.Builder()
                     .url("$backendUrl$endpoint")
-                    .addHeader("Authorization", "Bearer $authToken")
+                    .addHeader("x-auth-token", authToken)
                     .post(json.toString().toRequestBody("application/json".toMediaType()))
                     .build()
             ).execute()

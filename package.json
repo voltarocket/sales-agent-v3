@@ -5,8 +5,8 @@
   "scripts": {
     "dev":             "concurrently \"npm run dev:global\" \"npm run dev:local\" \"npm run dev:desktop\" --names \"global,local,desktop\" --prefix-colors \"blue,cyan,magenta\"",
     "dev:all":         "concurrently \"npm run dev:global\" \"npm run dev:local\" \"npm run dev:desktop\" \"npm run dev:admin\" --names \"global,local,client,admin\" --prefix-colors \"blue,cyan,magenta,yellow\"",
-    "dev:global":      "cd global-backend && npm run dev",
-    "dev:local":       "cd backend && npm run dev",
+    "dev:global":      "cd global-backend && python main.py",
+    "dev:local":       "cd backend && python main.py",
     "dev:desktop":     "cd desktop && npm start",
     "dev:admin":       "cd admin && npm start",
     "docker:up":       "docker compose up --build",
@@ -16,7 +16,7 @@
     "docker:local":    "docker compose -f docker-compose.local.yml up -d --build",
     "dev:website":     "cd website/frontend && npm run dev",
     "install:website": "cd website/frontend && npm install",
-    "install:all":     "npm install && cd backend && npm install && cd ../global-backend && npm install && cd ../desktop && npm install && cd ../admin && npm install"
+    "install:all":     "npm install && pip install -r backend/requirements.txt && pip install -r global-backend/requirements.txt && cd desktop && npm install && cd ../admin && npm install"
   },
   "devDependencies": { "concurrently": "^8.2.2" }
 }
