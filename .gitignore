@@ -9,6 +9,12 @@ backend/sales.json
 .DS_Store
 dist/
 
+# Android build artifacts
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+
 # Claude Code
 .claude/
 CLAUDE.md

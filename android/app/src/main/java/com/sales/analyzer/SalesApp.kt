@@ -28,10 +28,7 @@ class SalesApp : Application() {
             )
 
             val phoneAccount = PhoneAccount.builder(handle, "Diallog")
-                .setCapabilities(
-                    PhoneAccount.CAPABILITY_CALL_PROVIDER or
-                    PhoneAccount.CAPABILITY_SUPPORTS_VOICE_CALLING_INDICATIONS
-                )
+                .setCapabilities(PhoneAccount.CAPABILITY_CALL_PROVIDER)
                 .build()
 
             telecomManager.registerPhoneAccount(phoneAccount)

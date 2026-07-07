@@ -48,6 +48,15 @@
             android:exported="false"
             android:screenOrientation="unspecified"/>
 
+        <activity
+            android:name=".InCallActivity"
+            android:exported="false"
+            android:screenOrientation="portrait"
+            android:launchMode="singleTask"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"/>
+
         <!-- Фикс #5,#6: убраны комментарии со словом INCALL -->
         <service
             android:name=".CallService"
