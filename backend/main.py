@@ -1201,37 +1201,6 @@ async def auth_logout(req: Request):
 # NOTIFICATIONS
 # ═══════════════════════════════════════════════════════════
 
-@app.post("/api/notify")
-async def notify(req: Request):
-    b            = await req.json()
-    manager_name = b.get("managerName", "")
-    violations   = b.get("violations", 0)
-    threshold    = b.get("threshold", 0)
-
-    if os.getenv("TELEGRAM_BOT_TOKEN") and os.getenv("TELEGRAM_CHAT_ID"):
-        try:
-            async with httpx.AsyncClient(timeout=10) as client:
-                r = await client.post(
-                    f"https://api.telegram.org/bot{os.getenv('TELEGRAM_BOT_TOKEN')}/sendMessage",
-                    json={
-                        "chat_id":    os.getenv("TELEGRAM_CHAT_ID"),
-                        "text":       (
-                            f"⚠️ *Sales Alert*\n"
-                            f"Менеджер *{manager_name}*: *{violations}/{threshold}* нарушений\n"
-                            f"🕐 {datetime.datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"
-                        ),
-                        "parse_mode": "Markdown",
-                    },
-                )
-            if not r.is_success:
-                raise RuntimeError(r.json().get("description"))
-            return {"ok": True, "mode": "telegram"}
-        except Exception as e:
-            print(f"[NOTIFY] {e}")
-
-    print(f"[NOTIFY] {manager_name}: {violations}/{threshold}")
-    return {"ok": True, "mode": "console"}
-
 @app.post("/api/notify-check")
 async def notify_check(req: Request):
     b          = await req.json()
