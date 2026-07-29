@@ -426,6 +426,7 @@ async def process_session(session: dict, duration: int) -> dict:
         analysis.get("recommendation", ""),
         session.get("managerId"),
     )
+    await broadcast({"type": "call_saved", "id": call["id"], "phone": call["phone"]})
 
     return {
         "callId":     call["id"],
