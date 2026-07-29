@@ -341,16 +341,25 @@ async def transcribe_groq(file_path: str) -> dict:
     return {"text": d.get("text", ""), "duration": d.get("duration")}
 
 async def _transcribe_yandex_chunk(wav_path: str) -> str:
-    from pathlib import Path
-    data = Path(wav_path).read_bytes()
-    if len(data) > 1024 * 1024:
+    import wave
+    with wave.open(wav_path, "rb") as wf:
+        rate = wf.getframerate()
+        pcm  = wf.readframes(wf.getnframes())
+    if len(pcm) > 1024 * 1024:
         raise RuntimeError("Chunk > 1MB")
-    url = f"https://stt.api.cloud.yandex.net/speech/v1/stt:recognize?folderId={YANDEX_FOLDER_ID}&lang=ru-RU"
+    # Yandex SpeechKit determines audio format from the `format`/`sampleRateHertz`
+    # query params, not Content-Type — without them it defaults to OggOpus and
+    # rejects raw PCM/WAV with an "ogg header not found" error. `lpcm` expects
+    # headerless PCM, so the WAV RIFF header must be stripped (done via `wave` above).
+    url = (
+        "https://stt.api.cloud.yandex.net/speech/v1/stt:recognize"
+        f"?folderId={YANDEX_FOLDER_ID}&lang=ru-RU&format=lpcm&sampleRateHertz={rate}"
+    )
     async with httpx.AsyncClient(timeout=60) as client:
         r = await client.post(
             url,
-            headers={"Authorization": f"Api-Key {YANDEX_API_KEY}", "Content-Type": "audio/wav"},
-            content=data,
+            headers={"Authorization": f"Api-Key {YANDEX_API_KEY}"},
+            content=pcm,
         )
     if not r.is_success:
         ct  = r.headers.get("content-type", "")
