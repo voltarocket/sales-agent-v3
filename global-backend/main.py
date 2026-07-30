@@ -91,7 +91,11 @@ def split_wav(wav_path: str) -> list:
         [
             FFMPEG, "-y", "-i", wav_path,
             "-ar", "16000", "-ac", "1", "-acodec", "pcm_s16le",
-            "-f", "segment", "-segment_time", "30",
+            # ffmpeg's segment_time is a floor, not a ceiling — it only cuts once a
+            # chunk reaches this length, so real chunks land at 25s+ (a bit over).
+            # Yandex SpeechKit's sync recognize endpoint rejects anything >= 30s,
+            # so target well below that to leave room for the overshoot.
+            "-f", "segment", "-segment_time", "25",
             os.path.join(chunk_dir, "chunk_%03d.wav"),
         ],
         capture_output=True, timeout=120,
