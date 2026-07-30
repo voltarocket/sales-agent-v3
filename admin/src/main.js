@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain } = require("electron");
 const path = require("path");
 const fs   = require("fs");
+const WS   = require("ws");
 
 function readInstallerUrl() {
   try {
@@ -10,9 +11,11 @@ function readInstallerUrl() {
   return null;
 }
 const BACKEND_URL = process.env.BACKEND_URL || readInstallerUrl() || "http://localhost:3001";
+const BACKEND_WS  = process.env.BACKEND_WS  || BACKEND_URL.replace(/^http/, "ws");
 
 let mainWindow  = null;
 let adminToken  = null;
+let wsClient    = null;
 
 // recordings dir — for local audio playback
 const SHARED_DIR     = path.join(app.getPath("appData"), "SalesCallAnalyzer");
@@ -38,8 +41,30 @@ function createWindow() {
   if (process.argv.includes("--dev")) mainWindow.webContents.openDevTools({ mode: "detach" });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(() => { createWindow(); connectBackend(); });
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
+
+// ═══════════════════════════════════════════════════════════
+// BACKEND WEBSOCKET — live refresh on new/updated calls & contacts
+// ═══════════════════════════════════════════════════════════
+function connectBackend() {
+  try {
+    wsClient = new WS(BACKEND_WS);
+    wsClient.on("open",  () => { mainWindow?.webContents.send("ws-status", "connected"); });
+    wsClient.on("close", () => {
+      mainWindow?.webContents.send("ws-status", "disconnected");
+      setTimeout(connectBackend, 3000);
+    });
+    wsClient.on("message", raw => {
+      try {
+        const msg = JSON.parse(raw.toString());
+        if (["call_saved", "contact_saved"].includes(msg.type))
+          mainWindow?.webContents.send("data-updated", msg.type);
+      } catch (_) {}
+    });
+    wsClient.on("error", () => {});
+  } catch (_) { setTimeout(connectBackend, 3000); }
+}
 
 // ═══════════════════════════════════════════════════════════
 // BACKEND HTTP

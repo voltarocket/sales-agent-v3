@@ -1252,4 +1252,5 @@ code{font-family:var(--mono);font-size:12px;background:var(--surface2);padding:2
 document.head.appendChild(style);
 
 // ── Init ──────────────────────────────────────────────────
+window.api.on("data-updated", () => { if (S.token) load(); });
 render();

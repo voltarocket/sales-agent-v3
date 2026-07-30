@@ -5,32 +5,40 @@
   "main": "src/main.js",
   "scripts": {
     "start": "electron .",
-    "dev":   "electron . --dev",
+    "dev": "electron . --dev",
     "build": "electron-builder"
   },
-  "dependencies": {},
+  "dependencies": {
+    "ws": "^8.21.1"
+  },
   "devDependencies": {
-    "electron":         "^31.0.0",
+    "electron": "^31.0.0",
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId":       "com.sales.admin",
+    "appId": "com.sales.admin",
     "productName": "Sales Admin",
-    "files":       ["src/**/*"],
+    "files": [
+      "src/**/*"
+    ],
     "win": {
       "target": "nsis",
       "requestedExecutionLevel": "asInvoker",
       "signAndEditExecutable": false
     },
     "nsis": {
-      "oneClick":                          false,
+      "oneClick": false,
       "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut":             true,
-      "createStartMenuShortcut":           true,
-      "shortcutName":                      "Sales Admin",
-      "include":                           "installer.nsh"
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Sales Admin",
+      "include": "installer.nsh"
     },
-    "mac":   { "target": "dmg" },
-    "linux": { "target": "AppImage" }
+    "mac": {
+      "target": "dmg"
+    },
+    "linux": {
+      "target": "AppImage"
+    }
   }
 }

@@ -97,12 +97,15 @@ def split_wav(wav_path: str) -> list:
         capture_output=True, timeout=120,
     )
     if r.returncode != 0:
+        print(f"[split_wav] ffmpeg segment failed: {r.stderr.decode(errors='replace')}")
         return [wav_path]
     chunks = sorted(
         os.path.join(chunk_dir, f)
         for f in os.listdir(chunk_dir)
         if f.endswith(".wav")
     )
+    if not chunks:
+        print(f"[split_wav] no chunks produced in {chunk_dir}, falling back to whole file")
     return chunks if chunks else [wav_path]
 
 # ═══════════════════════════════════════════════════════════

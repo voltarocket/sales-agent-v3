@@ -8,4 +8,11 @@ contextBridge.exposeInMainWorld("api", {
   patch:       (endpoint, body) => ipcRenderer.invoke("api-patch",  endpoint, body),
   delete:      (endpoint)       => ipcRenderer.invoke("api-delete", endpoint),
   getAudioData:(filename)       => ipcRenderer.invoke("get-audio-data", filename),
+
+  // Events from main process
+  on:  (ch, cb) => {
+    const ok = ["ws-status", "data-updated"];
+    if (ok.includes(ch)) ipcRenderer.on(ch, (_, ...a) => cb(...a));
+  },
+  off: (ch) => ipcRenderer.removeAllListeners(ch),
 });
