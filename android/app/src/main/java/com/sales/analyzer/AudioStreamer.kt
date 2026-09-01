@@ -2,8 +2,13 @@ package com.sales.analyzer
 
 import android.util.Log
 import okhttp3.*
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.asRequestBody
+import okhttp3.RequestBody.Companion.toRequestBody
 import okio.ByteString.Companion.toByteString
+import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.util.concurrent.TimeUnit
 
 class AudioStreamer(private val backendWsUrl: String) {
@@ -72,6 +77,69 @@ class AudioStreamer(private val backendWsUrl: String) {
     }
 
     fun isConnected() = ws != null
+
+    /**
+     * Uploads a native call-recording file (found via [CallRecordingLocator]) through the
+     * existing HTTP pipeline instead of the live WS PCM stream — used when the OEM's own
+     * call recorder produced a file, since it's a far more reliable audio source than
+     * whatever our AudioRecord capture managed to pick up during the call.
+     */
+    fun uploadRecordingFile(file: File, phone: String, managerId: Int, managerName: String) {
+        val httpUrl = backendWsUrl.replace("ws://", "http://").replace("wss://", "https://")
+        Thread {
+            try {
+                val body = MultipartBody.Builder().setType(MultipartBody.FORM)
+                    .addFormDataPart("audio", file.name, file.asRequestBody("audio/*".toMediaType()))
+                    .build()
+                val transcribeResp = client.newCall(
+                    Request.Builder().url("$httpUrl/api/transcribe").post(body).build()
+                ).execute()
+                val transcribeJson = JSONObject(transcribeResp.body?.string() ?: "{}")
+                val transcript = transcribeJson.optString("transcript", "")
+                val duration   = transcribeJson.optInt("duration", 0)
+
+                var summary = ""; var score = 0; var recommendation = ""
+                var errorsJson: JSONArray = JSONArray()
+                var positivesJson: JSONArray = JSONArray()
+
+                if (transcript.isNotBlank()) {
+                    val analyzeBody = JSONObject().apply {
+                        put("managerName", managerName.ifEmpty { "Менеджер" })
+                        put("transcript", transcript)
+                    }.toString().toRequestBody("application/json".toMediaType())
+                    val analyzeResp = client.newCall(
+                        Request.Builder().url("$httpUrl/api/analyze").post(analyzeBody).build()
+                    ).execute()
+                    val a = JSONObject(analyzeResp.body?.string() ?: "{}")
+                    summary        = a.optString("summary", "")
+                    score          = a.optInt("score", 0)
+                    recommendation = a.optString("recommendation", "")
+                    errorsJson     = a.optJSONArray("errors") ?: JSONArray()
+                    positivesJson  = a.optJSONArray("positives") ?: JSONArray()
+                }
+
+                val saveBody = JSONObject().apply {
+                    put("phone", phone)
+                    put("direction", "outbound")
+                    put("duration", duration)
+                    put("transcript", transcript)
+                    put("summary", summary)
+                    put("score", score)
+                    put("errors", errorsJson)
+                    put("positives", positivesJson)
+                    put("recommendation", recommendation)
+                    put("manager_id", managerId)
+                }.toString().toRequestBody("application/json".toMediaType())
+                client.newCall(Request.Builder().url("$httpUrl/api/calls").post(saveBody).build()).execute()
+
+                Log.d("Streamer", "Recording file uploaded: ${transcript.length} chars, score=$score")
+            } catch (e: Exception) {
+                Log.e("Streamer", "uploadRecordingFile failed: ${e.message}")
+            } finally {
+                file.delete()
+            }
+        }.start()
+    }
 }
 
 data class CallAnalysis(

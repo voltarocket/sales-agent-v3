@@ -80,11 +80,27 @@ class MainActivity : ComponentActivity() {
     private val callPermissionRequest = registerForActivityResult(
         ActivityResultContracts.RequestPermission()) {}
 
+    private val audioReadPermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) {}
+
+    private val recordAudioPermissionRequest = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()) {}
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE)
             != PackageManager.PERMISSION_GRANTED) {
             callPermissionRequest.launch(Manifest.permission.CALL_PHONE)
+        }
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO)
+            != PackageManager.PERMISSION_GRANTED) {
+            recordAudioPermissionRequest.launch(Manifest.permission.RECORD_AUDIO)
+        }
+        val mediaAudioPermission = if (android.os.Build.VERSION.SDK_INT >= 33)
+            Manifest.permission.READ_MEDIA_AUDIO else Manifest.permission.READ_EXTERNAL_STORAGE
+        if (ContextCompat.checkSelfPermission(this, mediaAudioPermission)
+            != PackageManager.PERMISSION_GRANTED) {
+            audioReadPermissionRequest.launch(mediaAudioPermission)
         }
         setContent { MaterialTheme(colorScheme = darkColorScheme()) { App() } }
     }

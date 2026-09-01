@@ -13,6 +13,11 @@
     <uses-permission android:name="android.permission.MANAGE_OWN_CALLS"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.CALL_PHONE"/>
+    <!-- Needed to locate the OEM's own call-recording file after a call, as a fallback
+         source when live AudioRecord capture doesn't pick up the other party's voice. -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO"/>
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32"/>
 
     <application
         android:name=".SalesApp"

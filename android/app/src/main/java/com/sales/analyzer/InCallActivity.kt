@@ -1,6 +1,5 @@
 package com.sales.analyzer
 
-import android.media.AudioManager
 import android.os.Bundle
 import android.telecom.Call
 import androidx.activity.ComponentActivity
@@ -66,7 +65,6 @@ class InCallActivity : ComponentActivity() {
 
         var isMuted by remember { mutableStateOf(false) }
         var isSpeaker by remember { mutableStateOf(false) }
-        val audioManager = remember { getSystemService(AUDIO_SERVICE) as AudioManager }
 
         val statusText = when (callState) {
             Call.STATE_RINGING             -> "Входящий звонок"
@@ -139,7 +137,7 @@ class InCallActivity : ComponentActivity() {
                                 bg = if (isMuted) Color(0xFF475569) else Color(0xFF1E293B)
                             ) {
                                 isMuted = !isMuted
-                                audioManager.isMicrophoneMute = isMuted
+                                CallService.setMuted(isMuted)
                             }
                             CallButton(
                                 emoji = "🔊",
@@ -147,7 +145,7 @@ class InCallActivity : ComponentActivity() {
                                 bg = if (isSpeaker) Color(0xFF475569) else Color(0xFF1E293B)
                             ) {
                                 isSpeaker = !isSpeaker
-                                audioManager.isSpeakerphoneOn = isSpeaker
+                                CallService.setSpeakerOn(isSpeaker)
                             }
                         }
                         Spacer(Modifier.height(28.dp))
