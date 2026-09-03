@@ -7,6 +7,9 @@ import android.content.pm.PackageManager
 import android.media.AudioFormat
 import android.media.AudioRecord
 import android.media.MediaRecorder.AudioSource
+import android.media.audiofx.AcousticEchoCanceler
+import android.media.audiofx.AutomaticGainControl
+import android.media.audiofx.NoiseSuppressor
 import android.os.IBinder
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -24,6 +27,10 @@ class AudioCaptureService : Service() {
     private var audioRecord: AudioRecord? = null
     private var isRecording = false
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+
+    private var aec: AcousticEchoCanceler? = null
+    private var ns:  NoiseSuppressor?      = null
+    private var agc: AutomaticGainControl? = null
 
     companion object {
         const val ACTION_START = "START"
@@ -64,13 +71,17 @@ class AudioCaptureService : Service() {
             stopSelf()
             return
         }
-        // VOICE_COMMUNICATION enables hardware AEC, which actively cancels whatever
-        // comes out of the earpiece/speaker from the mic signal — on speakerphone that's
-        // literally the other party's voice, so AEC was erasing it. Plain MIC skips that
-        // processing and picks up speaker bleed into the mic normally.
+        // Plain MIC is silently muted by the platform while a telephony call is active
+        // on many Android 10+ builds (confirmed on this device: Flyme Lite 1.0.1.0RU /
+        // Android 15) — AudioRecord.read() keeps returning zero-filled buffers all call
+        // long. VOICE_COMMUNICATION is the source the platform actually keeps live during
+        // a call, but it ships with hardware AEC/NS/AGC attached, and on speakerphone the
+        // AEC treats the other party's voice coming out of the speaker as echo and cancels
+        // it. So: use VOICE_COMMUNICATION for a live signal, then explicitly disable the
+        // effects bound to its audio session so the speaker bleed survives.
         val record = try {
             AudioRecord(
-                AudioSource.MIC,
+                AudioSource.VOICE_COMMUNICATION,
                 SAMPLE_RATE, AudioFormat.CHANNEL_IN_MONO,
                 AudioFormat.ENCODING_PCM_16BIT, BUFFER_SIZE
             )
@@ -88,6 +99,17 @@ class AudioCaptureService : Service() {
             return
         }
         audioRecord = record
+
+        val sessionId = record.audioSessionId
+        if (AcousticEchoCanceler.isAvailable()) {
+            aec = AcousticEchoCanceler.create(sessionId)?.apply { enabled = false }
+        }
+        if (NoiseSuppressor.isAvailable()) {
+            ns = NoiseSuppressor.create(sessionId)?.apply { enabled = false }
+        }
+        if (AutomaticGainControl.isAvailable()) {
+            agc = AutomaticGainControl.create(sessionId)?.apply { enabled = false }
+        }
         streamer?.startCall(phone, AppSession.managerId)
         record.startRecording()
         if (record.recordingState != AudioRecord.RECORDSTATE_RECORDING) {
@@ -110,6 +132,9 @@ class AudioCaptureService : Service() {
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null
+        aec?.release(); aec = null
+        ns?.release();  ns  = null
+        agc?.release(); agc = null
         streamer?.endCall()
         scope.cancel()
         Log.d("AudioCapture", "Recording stopped")

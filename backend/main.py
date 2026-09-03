@@ -406,11 +406,10 @@ async def process_session(session: dict, duration: int) -> dict:
             else:
                 print(f"[WS] ffmpeg convert failed: {r.stderr.decode()}")
 
-            if os.path.exists(tmp_wav):
-                os.unlink(tmp_wav)
+            # TEMP DEBUG: keep tmp_wav/tmp_pcm in uploads/ for manual inspection —
+            # revert this once the empty-STT-transcript issue is diagnosed.
         finally:
-            if os.path.exists(tmp_pcm):
-                os.unlink(tmp_pcm)
+            pass
 
     call = await pool.fetchrow(
         """INSERT INTO calls
